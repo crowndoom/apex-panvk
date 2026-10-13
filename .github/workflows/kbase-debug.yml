@@ -31,6 +31,7 @@ jobs:
             bison \
             build-essential \
             ca-certificates \
+            cmake \
             flex \
             libdrm-dev \
             libelf-dev \
@@ -49,7 +50,6 @@ jobs:
             python3-yaml \
             llvm-dev \
             glslang-tools \
-            spirv-tools \
             wayland-protocols \
             zlib1g-dev \
             zip
@@ -58,6 +58,20 @@ jobs:
             --no-install-recommends \
             "libclc-${LLVM_MAJOR}-dev" \
             "libllvmspirvlib-${LLVM_MAJOR}-dev"
+
+      - name: Build SPIRV-Tools from source (mesa-clc needs post-5534 API)
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/spirv"
+          rm -rf "$SRC"
+          mkdir -p "$SRC"
+          cd "$SRC"
+          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
+          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
+          cmake -S SPIRV-Headers -B headers-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSPIRV_HEADERS_SKIP_TESTS=ON -DSPIRV_HEADERS_SKIP_EXAMPLES=ON
+          cmake --build headers-build -j "$(nproc)" --target install
+          cmake -S SPIRV-Tools -B tools-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSPIRV_SKIP_TESTS=ON
+          cmake --build tools-build -j "$(nproc)" --target install
 
       - name: Install Meson
         run: |
