@@ -1,4 +1,4 @@
-name: Build PanVK MaliTools package (Winlator / emulators)
+          name: "PanVK MaliTools package - ${{ needs.prepare.outputs.date }} ${{ needs.prepare.outputs.time }} UTC"
 
 # Produces a MaliTools "ADPKG" driver package (AdrenoTools-compatible format):
 #   meta.json        - package manifest (see libadrenotools tools/ADPKG.md)
@@ -106,7 +106,6 @@ jobs:
               libclc-18-dev \
               libllvmspirvlib-18-dev \
               libelf-dev \
-              spirv-tools \
               bison \
               flex \
               libdrm-dev \
@@ -118,6 +117,20 @@ jobs:
               unzip
           python -m pip install --upgrade pip
           pip install mako PyYAML meson ninja packaging
+
+      - name: Build SPIRV-Tools from source (mesa-clc needs post-5534 API)
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/spirv"
+          rm -rf "$SRC"
+          mkdir -p "$SRC"
+          cd "$SRC"
+          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
+          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
+          cmake -S SPIRV-Headers -B headers-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSPIRV_HEADERS_SKIP_TESTS=ON -DSPIRV_HEADERS_SKIP_EXAMPLES=ON
+          sudo cmake --build headers-build -j "$(nproc)" --target install
+          cmake -S SPIRV-Tools -B tools-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSPIRV_SKIP_TESTS=ON
+          sudo cmake --build tools-build -j "$(nproc)" --target install
 
       - name: Verify libdrm headers are present
         run: |
@@ -682,7 +695,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
-          name: "PanVK MaliTools package — ${{ needs.prepare.outputs.date }} ${{ needs.prepare.outputs.time }} UTC"
+          name: "PanVK MaliTools package - ${{ needs.prepare.outputs.date }} ${{ needs.prepare.outputs.time }} UTC"
           body: |
             ## PanVK MaliTools driver package (aarch64, Mali-G57)
 
