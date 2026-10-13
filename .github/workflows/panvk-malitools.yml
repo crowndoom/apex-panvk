@@ -136,6 +136,32 @@ jobs:
           cmake -S SPIRV-Tools -B tools-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSPIRV_SKIP_TESTS=ON
           sudo cmake --build tools-build -j "$(nproc)" --target install
 
+      - name: Diagnose SPIRV-Tools install (what meson will see)
+        run: |
+          set -euo pipefail
+          echo "==== installed linker.hpp API ===="
+          grep -n "SetAllowPtrTypeMismatch" /usr/include/spirv-tools/linker.hpp
+          echo "==== pkg-config files ===="
+          ls /usr/lib/x86_64-linux-gnu/pkgconfig/ /usr/share/pkgconfig/ /usr/lib/pkgconfig/ 2>/dev/null | grep -i -E "spirv|SPIRV" || true
+          echo "==== cmake configs ===="
+          ls -d /usr/lib/cmake/SPIRV-Tools /usr/share/cmake/SPIRV-Tools /usr/local/lib/cmake/SPIRV-Tools 2>/dev/null || true
+          echo "==== meson's-eye view ===="
+          pkg-config --modversion SPIRV-Tools || pkg-config --modversion SPIRV-Tools-shared || pkg-config --modversion spirv-tools || true
+          pkg-config --cflags --libs SPIRV-Tools 2>/dev/null || pkg-config --cflags --libs SPIRV-Tools-shared 2>/dev/null || true
+          echo "==== manual compile of meson's exact probe ===="
+          cat > /tmp/linktest.cpp <<'EOF'
+          #include <spirv-tools/linker.hpp>
+          int main() {
+            spvtools::LinkerOptions options;
+            options.SetAllowPtrTypeMismatch(true);
+            return 0;
+          }
+          EOF
+          g++ -c /tmp/linktest.cpp -o /tmp/linktest.o && echo "MANUAL COMPILE OK"
+          sudo cmake --build headers-build -j "$(nproc)" --target install
+          cmake -S SPIRV-Tools -B tools-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSPIRV_SKIP_TESTS=ON
+          sudo cmake --build tools-build -j "$(nproc)" --target install
+
       - name: Verify libdrm headers are present
         run: |
           set -euo pipefail
