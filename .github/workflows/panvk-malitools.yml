@@ -127,6 +127,10 @@ jobs:
           cd "$SRC"
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
+          # SPIRV-Tools only looks for headers in its external/ submodule dir.
+          rm -rf SPIRV-Tools/external/spirv-headers
+          mkdir -p SPIRV-Tools/external
+          ln -s "$SRC/SPIRV-Headers" SPIRV-Tools/external/spirv-headers
           cmake -S SPIRV-Headers -B headers-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSPIRV_HEADERS_SKIP_TESTS=ON -DSPIRV_HEADERS_SKIP_EXAMPLES=ON
           sudo cmake --build headers-build -j "$(nproc)" --target install
           cmake -S SPIRV-Tools -B tools-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSPIRV_SKIP_TESTS=ON
