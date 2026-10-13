@@ -1,4 +1,4 @@
-          name: "PanVK MaliTools package - ${{ needs.prepare.outputs.date }} ${{ needs.prepare.outputs.time }} UTC"
+name: Build PanVK MaliTools package (Winlator / emulators)
 
 # Produces a MaliTools "ADPKG" driver package (AdrenoTools-compatible format):
 #   meta.json        - package manifest (see libadrenotools tools/ADPKG.md)
