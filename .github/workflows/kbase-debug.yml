@@ -33,6 +33,7 @@ jobs:
             ca-certificates \
             cmake \
             flex \
+            git \
             libdrm-dev \
             libelf-dev \
             libexpat1-dev \
