@@ -234,6 +234,11 @@ jobs:
           cp /usr/include/xf86drm.h     "$DEST/"
           cp /usr/include/xf86drmMode.h "$DEST/"
           cp /usr/include/libdrm/*.h    "$DEST/"
+          # zstd.h for -Dzstd=enabled: same shadowing problem as libdrm
+          # (meson strips -I/usr/include from pkg-config cflags and the NDK
+          # compiler never looks in host /usr/include), so stage it here.
+          cp /usr/include/zstd.h "$DEST/"
+          cp /usr/include/zstd_errors.h "$DEST/" || true
           echo "==== $DEST ===="
           ls -la "$DEST"
           for h in xf86drm.h drm.h drm_fourcc.h; do
