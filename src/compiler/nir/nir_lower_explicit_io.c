@@ -1704,11 +1704,7 @@ lower_explicit_io_deref(nir_builder *b, nir_deref_instr *deref,
 
    nir_def *addr = nir_explicit_io_address_from_deref(b, deref, base_addr,
                                                       addr_format);
-   /* CL frontends (via LLVM) can produce 32-bit addresses where the
-    * selected format expects 64-bit (seen with 62bit_generic on libpan
-    * precomp shaders). Zero-extend instead of asserting, as older Mesa
-    * did here; the extension is semantics-preserving. */
-   if (addr->bit_size != deref->def.bit_size) addr = nir_u2uN(b, addr, deref->def.bit_size);
+   assert(addr->bit_size == deref->def.bit_size);
    assert(addr->num_components == deref->def.num_components);
 
    nir_instr_remove(&deref->instr);
@@ -2448,10 +2444,8 @@ nir_build_addr_iadd(nir_builder *b, nir_def *addr,
 
    case nir_address_format_62bit_generic:
       assert(addr->num_components == 1);
-      assert(addr->bit_size == 64 || addr->bit_size == 32);
-      if (addr->bit_size == 32) addr = nir_u2u64(b, addr);
-      assert(offset->bit_size == 64 || offset->bit_size == 32);
-      if (offset->bit_size == 32) offset = nir_u2u64(b, offset);
+      assert(addr->bit_size == 64);
+      assert(offset->bit_size == 64);
       if (!(modes & ~(nir_var_function_temp |
                       nir_var_shader_temp |
                       nir_var_mem_shared))) {
