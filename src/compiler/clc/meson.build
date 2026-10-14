@@ -94,7 +94,11 @@ has_spirv_link_workaround = cpp.compiles(
   }
   ''',
   dependencies : dep_spirv_tools,
-  args : ['-Wno-error=unguarded-availability', '-Wno-error=unguarded-availability-new'],
+  # These silences are for AppleClang's -Wunguarded-availability; GCC treats
+  # unknown -Wno-error= as a hard error, so only pass what this compiler
+  # accepts (otherwise every GCC configure fails with a misleading
+  # "doesn't contain PR 5534" error even with a brand-new SPIRV-Tools).
+  args : cpp.get_supported_arguments('-Wno-error=unguarded-availability', '-Wno-error=unguarded-availability-new'),
 )
 if dep_llvm.version().version_compare('>= 17.0') and not has_spirv_link_workaround
   error('SPIRV-Tools doesn\'t contain https://github.com/KhronosGroup/SPIRV-Tools/pull/5534\n')
