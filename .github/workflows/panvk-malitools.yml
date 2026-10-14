@@ -161,6 +161,19 @@ jobs:
           echo "==== hunt for -llog provider ===="
           grep -rn -- "-llog" /usr/lib/x86_64-linux-gnu/pkgconfig/ /usr/share/pkgconfig/ /usr/lib/pkgconfig/ /usr/lib/cmake/ /usr/share/cmake/ /usr/lib/x86_64-linux-gnu/cmake/ 2>/dev/null || echo "no -llog in pc/cmake files"
 
+      - name: Stub Android liblog (transitive -llog has no Ubuntu provider)
+        run: |
+          set -euo pipefail
+          # Something in the host link graph emits -llog (Android-only) when
+          # static archives are in play; nothing on Ubuntu provides it. An
+          # empty stub satisfies the linker (--as-needed drops it when no
+          # symbol is actually used). No shadowing risk: no Ubuntu package
+          # ships liblog.so.
+          echo 'void apex_log_stub_unused(void) {}' > /tmp/log_stub.c
+          cc -shared -o /tmp/liblog.so /tmp/log_stub.c
+          sudo cp /tmp/liblog.so /usr/lib/x86_64-linux-gnu/liblog.so
+          sudo ldconfig
+
       - name: Verify libdrm headers are present
         run: |
           set -euo pipefail

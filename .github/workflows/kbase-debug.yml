@@ -83,6 +83,19 @@ jobs:
           python3 -m pip install --break-system-packages \
             'meson>=1.4.0,<2'
 
+      - name: Stub Android liblog (transitive -llog has no Debian provider)
+        run: |
+          set -euo pipefail
+          # A static archive in the graph emits -llog, which exists only on
+          # archive in the graph emits -llog, which exists only on Android.
+          # Empty stub + --as-needed carries the link; nothing in Debian
+          # ships liblog.so so there is no shadowing risk. Container runs
+          # as root, no sudo needed.
+          echo 'void apex_log_stub_unused(void) {}' > /tmp/log_stub.c
+          cc -shared -o /tmp/liblog.so /tmp/log_stub.c
+          cp /tmp/liblog.so /usr/lib/aarch64-linux-gnu/liblog.so
+          ldconfig
+
       - name: Configure
         run: |
           meson setup "${BUILD_DIR}" \
