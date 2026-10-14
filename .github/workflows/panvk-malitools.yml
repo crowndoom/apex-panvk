@@ -158,6 +158,8 @@ jobs:
           }
           EOF
           g++ -c /tmp/linktest.cpp -o /tmp/linktest.o && echo "MANUAL COMPILE OK"
+          echo "==== hunt for -llog provider ===="
+          grep -rn -- "-llog" /usr/lib/x86_64-linux-gnu/pkgconfig/ /usr/share/pkgconfig/ /usr/lib/pkgconfig/ /usr/lib/cmake/ /usr/share/cmake/ /usr/lib/x86_64-linux-gnu/cmake/ 2>/dev/null || echo "no -llog in pc/cmake files"
 
       - name: Verify libdrm headers are present
         run: |
