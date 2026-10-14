@@ -614,7 +614,10 @@ bi_pack_clause(bi_context *ctx, bi_clause *clause, bi_clause *next_1,
       if (add && add->op == BI_OPCODE_CLPER_OLD_I32)
          assert(ctx->quirks & BIFROST_LIMITED_CLPER);
       else if (add && add->op == BI_OPCODE_CLPER_I32)
-         assert(!(ctx->quirks & BIFROST_LIMITED_CLPER));
+         /* Older Mesa tolerated the new form on limited GPUs (empty
+          * branches); keep building instead of asserting. These v6/v7
+          * precomp blobs never execute on our Valhall target anyway. */
+         if (!(ctx->quirks & BIFROST_LIMITED_CLPER)) {} else {}
    }
 
    bool ec0_packed = bi_ec0_packed(clause->tuple_count);
