@@ -1431,6 +1431,18 @@ panvk_BindImageMemory2(VkDevice device, uint32_t bindInfoCount,
       const VkBindMemoryStatus *bind_status =
          vk_find_struct_const(&pBindInfos[i], BIND_MEMORY_STATUS);
       VkResult bind_result = panvk_image_bind(dev, &pBindInfos[i]);
+      /* APEXDIAG (temporary): log image-memory binds with offsets. */
+      {
+         static unsigned apexdiag_n = 0;
+         if (apexdiag_n < 80) {
+            fprintf(stderr,
+                    "APEXDIAG Bind #%u image=%p mem=%p offset=%llu result=%d\n",
+                    apexdiag_n++, (const void *)pBindInfos[i].image,
+                    (const void *)pBindInfos[i].memory,
+                    (unsigned long long)pBindInfos[i].memoryOffset,
+                    bind_result);
+         }
+      }
       if (bind_status)
          *bind_status->pResult = bind_result;
       if (bind_result != VK_SUCCESS)
