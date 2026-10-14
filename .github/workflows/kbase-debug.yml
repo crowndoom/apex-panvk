@@ -67,8 +67,8 @@ jobs:
           rm -rf "$SRC"
           mkdir -p "$SRC"
           cd "$SRC"
-          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
-          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
+          git clone --depth 1 --branch v2025.3 https://github.com/KhronosGroup/SPIRV-Headers.git
+          git clone --depth 1 --branch v2025.3 https://github.com/KhronosGroup/SPIRV-Tools.git
           # SPIRV-Tools only looks for headers in its external/ submodule dir.
           rm -rf SPIRV-Tools/external/spirv-headers
           mkdir -p SPIRV-Tools/external
