@@ -288,7 +288,9 @@ jobs:
           MESON_WORKING_DIR="$GITHUB_WORKSPACE/mesa-src"
           export MESON_WORKING_DIR ANDROID_NDK_HOME="$NDK"
 
-          API=30
+          # API 36 (Android 16, matches this phone + Frist 2.0-rc1's
+          # minApi 36): AHB/gralloc mapper paths differ from API 30.
+          API=36
 
           cat > android.toml <<EOF
           [binaries]
@@ -509,7 +511,7 @@ jobs:
               -Dplatforms=android \
               -Dandroid-stub=true \
               -Dandroid-libbacktrace=disabled \
-              -Dplatform-sdk-version=30 \
+              -Dplatform-sdk-version=36 \
               -Dglx=disabled \
               -Dgbm=disabled \
               -Degl=disabled \
@@ -588,7 +590,7 @@ jobs:
             NDK="/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk 2>/dev/null | sort -V | tail -1)"
           fi
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
-          API=30
+          API=36
 
           OUT="malitools-out"
           rm -rf "$OUT"
@@ -624,7 +626,7 @@ jobs:
             "packageVersion": "${{ needs.prepare.outputs.stamp }}",
             "vendor": "Mesa",
             "driverVersion": "${DRIVER_VER}",
-            "minApi": 30,
+            "minApi": 36,
             "libraryName": "vulkan.panvk.so"
           }
           EOF
