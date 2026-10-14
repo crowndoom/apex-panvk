@@ -114,6 +114,21 @@ panvk_AllocateMemory(VkDevice _device,
    if (host_info && !host_info->handleType)
       host_info = NULL;
 
+   /* APEXDIAG (temporary): log every allocation with ext handle info. */
+   {
+      static unsigned apexdiag_n = 0;
+      if (apexdiag_n < 80) {
+         fprintf(stderr,
+                 "APEXDIAG AllocMem #%u size=%llu type=%u export=0x%x importfd=%d importhost=%d\n",
+                 apexdiag_n++,
+                 (unsigned long long)pAllocateInfo->allocationSize,
+                 pAllocateInfo->memoryTypeIndex,
+                 export_info ? export_info->handleTypes : 0,
+                 fd_info ? fd_info->fd : -1,
+                 host_info ? 1 : 0);
+      }
+   }
+
    if (host_info) {
       mem->bo = kbase_kmod_bo_import_host(device->kmod.dev,
                                           (void *)host_info->pHostPointer,
@@ -477,8 +492,21 @@ panvk_GetMemoryFdKHR(VkDevice _device, const VkMemoryGetFdInfoKHR *pGetFdInfo,
       pGetFdInfo->handleType == VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT);
 
    int prime_fd = pan_kmod_bo_export(memory->bo);
-   if (prime_fd < 0)
+   if (prime_fd < 0) {
+      fprintf(stderr, "APEXDIAG GetFd FAILED handletype=0x%x\n",
+              pGetFdInfo->handleType);
       return panvk_error(device, VK_ERROR_OUT_OF_DEVICE_MEMORY);
+   }
+
+   /* APEXDIAG (temporary): log every fd export. */
+   {
+      static unsigned apexdiag_n = 0;
+      if (apexdiag_n < 40) {
+         fprintf(stderr, "APEXDIAG GetFd #%u handletype=0x%x fd=%d size=%llu\n",
+                 apexdiag_n++, pGetFdInfo->handleType, prime_fd,
+                 (unsigned long long)pan_kmod_bo_size(memory->bo));
+      }
+   }
 
    *pFd = prime_fd;
    return VK_SUCCESS;

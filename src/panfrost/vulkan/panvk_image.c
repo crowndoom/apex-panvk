@@ -753,6 +753,25 @@ panvk_CreateImage(VkDevice device, const VkImageCreateInfo *pCreateInfo,
       to_panvk_physical_device(dev->vk.physical);
    VkResult result;
 
+   /* APEXDIAG (temporary present-path trace): log every image creation. */
+   {
+      static unsigned apexdiag_n = 0;
+      if (apexdiag_n < 60) {
+         const VkExternalMemoryImageCreateInfo *ext_info =
+            vk_find_struct_const(pCreateInfo->pNext,
+                                 EXTERNAL_MEMORY_IMAGE_CREATE_INFO);
+         fprintf(stderr,
+                 "APEXDIAG CreateImage #%u fmt=%d %ux%ux%u mip=%u layers=%u samples=%d usage=0x%x tiling=%d flags=0x%x swapchain=%d ext=0x%x\n",
+                 apexdiag_n++, pCreateInfo->format,
+                 pCreateInfo->extent.width, pCreateInfo->extent.height,
+                 pCreateInfo->extent.depth, pCreateInfo->mipLevels,
+                 pCreateInfo->arrayLayers, pCreateInfo->samples,
+                 pCreateInfo->usage, pCreateInfo->tiling, pCreateInfo->flags,
+                 wsi_common_is_swapchain_image(pCreateInfo),
+                 ext_info ? ext_info->handleTypes : 0);
+      }
+   }
+
    if (panvk_android_is_gralloc_image(pCreateInfo)) {
       return panvk_android_create_gralloc_image(device, pCreateInfo, pAllocator,
                                                 pImage);
