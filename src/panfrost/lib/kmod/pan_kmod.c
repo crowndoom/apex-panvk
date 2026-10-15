@@ -253,6 +253,17 @@ pan_kmod_bo_import(struct pan_kmod_dev *dev, int fd)
 out_unlock:
    simple_mtx_unlock(&dev->handle_to_bo.lock);
 
+   /* APEXDIAG (temporary): log dma-buf import results. */
+   {
+      static unsigned apexdiag_n = 0;
+      if (apexdiag_n < 40) {
+         mesa_loge("APEXDIAG Import fd=%d result: bo=%p size=%llu",
+                   fd, (void *)bo,
+                   (unsigned long long)(bo ? pan_kmod_bo_size(bo) : 0));
+         apexdiag_n++;
+      }
+   }
+
    return bo;
 
 err_close_handle:
@@ -260,6 +271,15 @@ err_close_handle:
 
 err_unlock:
    simple_mtx_unlock(&dev->handle_to_bo.lock);
+
+   /* APEXDIAG (temporary): import failures are otherwise silent. */
+   {
+      static unsigned apexdiag_n = 0;
+      if (apexdiag_n < 20) {
+         mesa_loge("APEXDIAG Import fd=%d FAILED", fd);
+         apexdiag_n++;
+      }
+   }
 
    return NULL;
 }
