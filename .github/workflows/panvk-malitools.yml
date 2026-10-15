@@ -109,6 +109,7 @@ jobs:
               bison \
               flex \
               libdrm-dev \
+              liblz4-dev \
               libzstd-dev \
               pkg-config \
               ninja-build \
@@ -239,6 +240,8 @@ jobs:
           # compiler never looks in host /usr/include), so stage it here.
           cp /usr/include/zstd.h "$DEST/"
           cp /usr/include/zstd_errors.h "$DEST/" || true
+          # lz4 headers: only needed to build zstd's throwaway CLI.
+          cp /usr/include/lz4.h /usr/include/lz4frame.h /usr/include/lz4hc.h "$DEST/" || true
           echo "==== $DEST ===="
           ls -la "$DEST"
           for h in xf86drm.h drm.h drm_fourcc.h; do
@@ -438,8 +441,7 @@ jobs:
           meson setup zstdbuild "zstd-${ZSTD_VER}/build/meson" \
               --cross-file /tmp/android_wrapper.toml \
               -Dprefix=/usr \
-              -Dlibdir=lib \
-              -Dbuild_programs=false
+              -Dlibdir=lib
           ninja -C zstdbuild
           DESTDIR="$WORK/destdir" ninja -C zstdbuild install
           ls -la "$WORK/destdir/usr/lib"
