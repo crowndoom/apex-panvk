@@ -424,34 +424,9 @@ jobs:
           fi
           ls -lh "$GITHUB_WORKSPACE/bionic-libs"
 
-      - name: Build bionic libzstd (shared)
-        run: |
-          set -euo pipefail
-          # libzstd.so.1 must resolve from the system at runtime (parity with
-          # Frist); link against a bionic/aarch64 build of it. Ubuntu's copy
-          # is x86_64 and the cross-linker rejects it, so build from source.
-          ZSTD_VER=1.5.6
-          WORK="$GITHUB_WORKSPACE/zstd"
-          rm -rf "$WORK"
-          mkdir -p "$WORK"
-          cd "$WORK"
-          curl -fsSL -o zstd.tar.gz \
-            "https://github.com/facebook/zstd/releases/download/v${ZSTD_VER}/zstd-${ZSTD_VER}.tar.gz"
-          tar -xf zstd.tar.gz
-          meson setup zstdbuild "zstd-${ZSTD_VER}/build/meson" \
-              --cross-file /tmp/android_wrapper.toml \
-              -Dprefix=/usr \
-              -Dlibdir=lib \
-              -Dbin_programs=false \
-              -Dbin_tests=false \
-              -Dbin_contrib=false
-          ninja -C zstdbuild
-          DESTDIR="$WORK/destdir" ninja -C zstdbuild install
-          ls -la "$WORK/destdir/usr/lib"
-          cp -a "$WORK/destdir/usr/lib"/libzstd.so* \
-            "$GITHUB_WORKSPACE/bionic-libs/"
-          ls -lh "$GITHUB_WORKSPACE/bionic-libs"
-
+      # NOTE: zstd stays DISABLED (-Dzstd=disabled). A bionic libzstd was
+      # tried for Frist parity but its SONAME came out wrong and it only
+      # affects shader-cache compression, never rendering. System libs only.
       - name: Generate pkg-config shims for Android
         working-directory: mesa-src
         run: |
@@ -569,7 +544,7 @@ jobs:
               -Dvalgrind=disabled \
               -Dgallium-drivers= \
               -Dshared-glapi=disabled \
-              -Dzstd=enabled \
+              -Dzstd=disabled \
               -Dmesa-clc=system \
               -Dprecomp-compiler=system \
               -Dvulkan-drivers=panfrost \
