@@ -441,7 +441,10 @@ jobs:
           meson setup zstdbuild "zstd-${ZSTD_VER}/build/meson" \
               --cross-file /tmp/android_wrapper.toml \
               -Dprefix=/usr \
-              -Dlibdir=lib
+              -Dlibdir=lib \
+              -Dbin_programs=false \
+              -Dbin_tests=false \
+              -Dbin_contrib=false
           ninja -C zstdbuild
           DESTDIR="$WORK/destdir" ninja -C zstdbuild install
           ls -la "$WORK/destdir/usr/lib"
