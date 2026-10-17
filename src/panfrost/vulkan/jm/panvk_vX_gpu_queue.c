@@ -68,7 +68,9 @@ panvk_overlap_enabled(void)
    static int on = -1;
    if (on < 0) {
       const char *e = getenv("PANVK_OVERLAP");
-      on = !(e && e[0] == '0');
+      /* OFF by default to prevent 0x58 back-to-back faults;
+       * enable with PANVK_OVERLAP=1 */
+      on = (e && e[0] != '0');
    }
    return on;
 }
