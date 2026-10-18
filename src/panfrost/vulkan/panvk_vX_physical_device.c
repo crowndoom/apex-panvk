@@ -10,7 +10,26 @@
  */
 
 #include <stdlib.h>
-#define PANVK_DXVK_COMPAT_ON() (getenv("PANVK_DXVK_COMPAT") != NULL && getenv("PANVK_DXVK_COMPAT")[0] == '1')
+#include <stdbool.h>
+/* Desktop-compat feature gate.
+ *
+ * PANVK_DXVK_COMPAT is set by Winlator's DXVK path.  Native Vulkan
+ * applications (Switch emulators, native GL/Vulkan games) do not go through
+ * DXVK, so give them an equivalently-named knob: PANVK_EMU_COMPAT.  Either
+ * one enables the full desktop feature set (geometry shaders, clip/cull
+ * distance, multiViewport, BC texture formats) that the emulator frontends
+ * query during device selection.
+ */
+static inline bool
+panvk_compat_on(void)
+{
+   const char *v = getenv("PANVK_DXVK_COMPAT");
+   if (v && v[0] == '1')
+      return true;
+   v = getenv("PANVK_EMU_COMPAT");
+   return v && v[0] == '1';
+}
+#define PANVK_DXVK_COMPAT_ON() panvk_compat_on()
 #include <sys/sysmacros.h>
 
 #include "git_sha1.h"
