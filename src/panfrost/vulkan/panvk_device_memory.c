@@ -63,6 +63,23 @@ panvk_memory_emit_report(struct panvk_device *device,
                                 (uintptr_t)(mem), heap_index);
 }
 
+static bool
+panvk_bo_matches_memory_type(const struct pan_kmod_bo *bo,
+                             VkMemoryPropertyFlags properties)
+{
+   if ((properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) &&
+       (bo->flags & PAN_KMOD_BO_FLAG_NO_MMAP))
+      return false;
+   if ((properties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) &&
+       (bo->flags & PAN_KMOD_BO_FLAG_WB_MMAP) &&
+       !(bo->flags & PAN_KMOD_BO_FLAG_IO_COHERENT))
+      return false;
+   if ((properties & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) &&
+       !(bo->flags & PAN_KMOD_BO_FLAG_WB_MMAP))
+      return false;
+   return true;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 panvk_AllocateMemory(VkDevice _device,
                      const VkMemoryAllocateInfo *pAllocateInfo,
@@ -79,6 +96,8 @@ panvk_AllocateMemory(VkDevice _device,
       to_panvk_physical_device(device->vk.physical);
    struct panvk_device_memory *mem;
    bool can_be_exported = false;
+   const bool kbase_jm_v9 = physical_device->kbase_node_path[0] &&
+      pan_arch(physical_device->kmod.dev->props.gpu_id) == 9;
    VkResult result;
 
    assert(pAllocateInfo->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
@@ -150,10 +169,10 @@ panvk_AllocateMemory(VkDevice _device,
    } else {
       uint32_t bo_flags = 0;
 
-      /* We don't do cached on exported buffers to keep the pre-WB_MMAP
-       * behavior.
-       */
-      if (!can_be_exported &&
+      /* WB_MMAP is safe on kbase JM v9 even for exportable memory: the
+       * backend picks the cached heap and adjusts the flags for the actual
+       * exporter. */
+      if ((!can_be_exported || kbase_jm_v9) &&
           (type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT))
          bo_flags |= PAN_KMOD_BO_FLAG_WB_MMAP;
 
@@ -165,6 +184,16 @@ panvk_AllocateMemory(VkDevice _device,
          result = panvk_error(device, VK_ERROR_OUT_OF_DEVICE_MEMORY);
          goto err_destroy_mem;
       }
+   }
+
+   /* Reject memory-type mismatches on kbase JM v9: the backend's flags
+    * (derived from the actual exporter) must not contradict the type the
+    * application picked, otherwise CPU visibility would be a lie. */
+   if (kbase_jm_v9 &&
+       !panvk_bo_matches_memory_type(mem->bo, type->propertyFlags)) {
+      result = panvk_error(device, fd_info ? VK_ERROR_INVALID_EXTERNAL_HANDLE
+                                           : VK_ERROR_OUT_OF_DEVICE_MEMORY);
+      goto err_put_bo;
    }
 
    /* Always GPU-map at creation time. */
@@ -457,9 +486,17 @@ panvk_FlushMappedMemoryRanges(VkDevice _device, uint32_t memoryRangeCount,
                               const VkMappedMemoryRange *pMemoryRanges)
 {
    VK_FROM_HANDLE(panvk_device, device, _device);
+   VkResult result =
+      sync_memory_ranges(device, memoryRangeCount, pMemoryRanges,
+                         PAN_KMOD_BO_SYNC_CPU_CACHE_FLUSH);
 
-   return sync_memory_ranges(device, memoryRangeCount, pMemoryRanges,
-                             PAN_KMOD_BO_SYNC_CPU_CACHE_FLUSH);
+   /* The explicit flush API boundary is where queued CPU cache operations
+    * are allowed to land on kbase: guarantee the queued syncs are issued
+    * before the application assumes GPU visibility. */
+   if (result == VK_SUCCESS)
+      pan_kmod_flush_bo_map_syncs(device->kmod.dev);
+
+   return result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL

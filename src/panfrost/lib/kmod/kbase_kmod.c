@@ -192,6 +192,9 @@ struct kbase_kmod_dev {
 
    /* Android dma-heap used for BOs which need to be shared with WSI. */
    int dma_heap_fd;
+   /* Cached system-heap fd for WB_MMAP requests on JM v9 (the default heap
+    * is system-uncached there because the interconnect is not IO-coherent). */
+   int dma_heap_cached_fd;
 
    /* Set when the CSF notification stream reports a queue-group error.
     * Vulkan queue status queries use this latch instead of invalidating and
@@ -266,7 +269,8 @@ kbase_kmod_supports_dmabuf(const struct pan_kmod_dev *dev)
    const struct kbase_kmod_dev *kbase_dev =
       container_of(dev, const struct kbase_kmod_dev, base);
 
-   return kbase_dev->dma_heap_fd >= 0;
+   return kbase_dev->dma_heap_fd >= 0 ||
+          kbase_dev->dma_heap_cached_fd >= 0;
 }
 
 /* -------------------------------------------------------------------------
@@ -1412,6 +1416,7 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
    kbase_dev->tracking_page = tracking_page;
    kbase_dev->next_handle = 1;
    kbase_dev->dma_heap_fd = -1;
+   kbase_dev->dma_heap_cached_fd = -1;
    kbase_dev->kcpu.fence_fd = -1;
    simple_mtx_init(&kbase_dev->kcpu.lock, mtx_plain);
 
@@ -1444,10 +1449,21 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
    free(props_buf);
 
    const char *dma_heap = getenv("PANVK_KBASE_DMA_HEAP");
-   if (!dma_heap || !dma_heap[0])
-      dma_heap = "/dev/dma_heap/system";
+   const char *cached_heap = dma_heap;
+   const bool jm_v9 = !kbase_dev->is_csf &&
+                      pan_arch(kbase_dev->base.props.gpu_id) == 9;
+   if (!dma_heap || !dma_heap[0]) {
+      /* JM v9 boards (MTK Mali-G57) are not IO-coherent: allocations must
+       * come out of the uncached heap so CPU writes reach the GPU without
+       * stale cache lines.  WB_MMAP allocations fall back to the cached
+       * heap via dma_heap_cached_fd. */
+      dma_heap = jm_v9 ? "/dev/dma_heap/system-uncached"
+                       : "/dev/dma_heap/system";
+      cached_heap = "/dev/dma_heap/system";
+   }
 
-   kbase_dev->dma_heap_fd = open(dma_heap, O_RDWR | O_CLOEXEC);
+   const int heap_open_flags = (jm_v9 ? O_RDONLY : O_RDWR) | O_CLOEXEC;
+   kbase_dev->dma_heap_fd = open(dma_heap, heap_open_flags);
    /* Android exposes dma-heaps read-only to apps (cr--r--r--); the
     * DMA_HEAP_IOCTL_ALLOC ioctl works fine on an O_RDONLY fd. */
    if (kbase_dev->dma_heap_fd < 0)
@@ -1456,11 +1472,16 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
    if (kbase_dev->dma_heap_fd < 0)
       mesa_logd("kbase: dma-heap unavailable at %s: %s", dma_heap,
                 strerror(errno));
+   kbase_dev->dma_heap_cached_fd = open(cached_heap, heap_open_flags);
+   if (kbase_dev->dma_heap_cached_fd < 0)
+      kbase_dev->dma_heap_cached_fd = open(cached_heap, O_RDONLY | O_CLOEXEC);
 
    if (!kbase_dev->base.props.gpu_id) {
       mesa_loge("kbase: failed to determine GPU ID from properties");
       if (kbase_dev->dma_heap_fd >= 0)
          close(kbase_dev->dma_heap_fd);
+      if (kbase_dev->dma_heap_cached_fd >= 0)
+         close(kbase_dev->dma_heap_cached_fd);
       munmap(tracking_page, 4096);
       /* On failure the caller keeps ownership of the fd (it closes it on
        * NULL return), so don't let pan_kmod_dev_cleanup() close it too. */
@@ -1523,6 +1544,8 @@ kbase_kmod_dev_destroy(struct pan_kmod_dev *dev)
 
    if (kbase_dev->dma_heap_fd >= 0)
       close(kbase_dev->dma_heap_fd);
+   if (kbase_dev->dma_heap_cached_fd >= 0)
+      close(kbase_dev->dma_heap_cached_fd);
 
    pan_kmod_dev_cleanup(dev);
    pan_kmod_free(dev->allocator, kbase_dev);
@@ -1678,6 +1701,35 @@ kbase_kmod_bo_import_host(struct pan_kmod_dev *dev, void *host_ptr,
    return &kbase_bo->base;
 }
 
+static uint32_t
+kbase_dmabuf_mapping_flags(struct pan_kmod_dev *dev, int fd,
+                           uint64_t import_flags)
+{
+   char path[64], line[256], exporter[64];
+   snprintf(path, sizeof(path), "/proc/self/fdinfo/%d", fd);
+   FILE *info = fopen(path, "re");
+   if (!info)
+      return PAN_KMOD_BO_FLAG_NO_MMAP;
+
+   uint32_t flags = PAN_KMOD_BO_FLAG_NO_MMAP;
+   while (fgets(line, sizeof(line), info)) {
+      if (sscanf(line, "exp_name: %63s", exporter) != 1)
+         continue;
+
+      if (!strcmp(exporter, "system-uncached")) {
+         flags = 0;
+      } else if (!strcmp(exporter, "system") &&
+                 pan_kmod_can_sync_bo_map_from_userland(dev)) {
+         flags = PAN_KMOD_BO_FLAG_WB_MMAP;
+         if (import_flags & BASE_MEM_COHERENT_SYSTEM)
+            flags |= PAN_KMOD_BO_FLAG_IO_COHERENT;
+      }
+      break;
+   }
+   fclose(info);
+   return flags;
+}
+
 static struct pan_kmod_bo *
 kbase_kmod_import_dmabuf(struct pan_kmod_dev *dev,
                          struct pan_kmod_vm *exclusive_vm, int fd,
@@ -1726,6 +1778,14 @@ kbase_kmod_import_dmabuf(struct pan_kmod_dev *dev,
    }
 
    const uint64_t bo_size = req.out.va_pages * page_size;
+   if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) == 9) {
+      /* On JM v9 the importer must not assume a cache policy: derive the
+       * mapping flags from the actual dma-buf exporter.  Unknown exporters
+       * get no host-visible mapping (NO_MMAP). */
+      kmod_flags &= ~(PAN_KMOD_BO_FLAG_WB_MMAP | PAN_KMOD_BO_FLAG_IO_COHERENT);
+      kmod_flags |= kbase_dmabuf_mapping_flags(dev, kbase_bo->dmabuf_fd,
+                                               req.out.flags);
+   }
    kbase_bo->same_va =
       (req.out.flags & (BASE_MEM_SAME_VA | BASE_MEM_NEED_MMAP)) != 0;
 
@@ -1784,12 +1844,19 @@ kbase_kmod_bo_alloc_dmabuf(struct pan_kmod_dev *dev, uint64_t size,
    struct kbase_kmod_dev *kbase_dev =
       container_of(dev, struct kbase_kmod_dev, base);
    const uint64_t page_size = 4096;
+   int heap_fd = kmod_flags & PAN_KMOD_BO_FLAG_WB_MMAP
+                    ? kbase_dev->dma_heap_cached_fd
+                    : kbase_dev->dma_heap_fd;
+   if (heap_fd < 0) {
+      errno = ENOTSUP;
+      return NULL;
+   }
    struct dma_heap_allocation_data alloc = {
       .len = ALIGN_POT(size, page_size),
       .fd_flags = O_RDWR | O_CLOEXEC,
    };
 
-   if (ioctl(kbase_dev->dma_heap_fd, DMA_HEAP_IOCTL_ALLOC, &alloc)) {
+   if (ioctl(heap_fd, DMA_HEAP_IOCTL_ALLOC, &alloc)) {
       mesa_loge("kbase: DMA_HEAP_IOCTL_ALLOC failed: %s", strerror(errno));
       return NULL;
    }
@@ -1812,8 +1879,13 @@ kbase_kmod_bo_alloc(struct pan_kmod_dev *dev,
        !(kmod_flags & (PAN_KMOD_BO_FLAG_EXECUTABLE |
                        PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT |
                        PAN_KMOD_BO_FLAG_CSF_EVENT |
-                       PAN_KMOD_BO_FLAG_NO_DMA_HEAP)))
-      return kbase_kmod_bo_alloc_dmabuf(dev, size, kmod_flags);
+                       PAN_KMOD_BO_FLAG_NO_DMA_HEAP))) {
+      struct pan_kmod_bo *bo =
+         kbase_kmod_bo_alloc_dmabuf(dev, size, kmod_flags);
+      /* Fall through to the native path if the heap is unavailable. */
+      if (bo)
+         return bo;
+   }
 
    const uint64_t page_size = 4096;
    uint64_t va_pages = (size + page_size - 1) / page_size;
