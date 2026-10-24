@@ -12,6 +12,14 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(__has_include)
+#  if __has_include("panvk_build_sha.h")
+#    include "panvk_build_sha.h"
+#  endif
+#endif
+#ifndef PANVK_G57_BUILD_SHA
+#define PANVK_G57_BUILD_SHA "unknown"
+#endif
 #include "drm-uapi/panthor_drm.h"
 
 #include "vk_cmd_enqueue_entrypoints.h"
@@ -598,6 +606,16 @@ panvk_per_arch(create_device)(struct panvk_physical_device *physical_device,
 
 #if PAN_ARCH <= 9
    {
+      /* BUILD banner: positively identifies which build each process loaded
+       * (the ADPKG/menu can silently serve a stale .so; this removes all
+       * ambiguity). Neutral stderr, mirrors APEXDIAG logcat tags. */
+      static int banner_n;
+      if (banner_n++ < 4)
+         fprintf(stderr,
+                 "[PANVK] build=%s arch=v%u kmd=%s done=%d\n",
+                 PANVK_G57_BUILD_SHA, PAN_ARCH,
+                 physical_device->kbase_node_path[0] ? "kbase" : "panthor",
+                 banner_n);
       uint64_t tiler_heap_mb = 512;
       const char *e = getenv("PANVK_TILER_HEAP_MB");
       if (e && atoi(e) >= 16 && atoi(e) <= 2048)

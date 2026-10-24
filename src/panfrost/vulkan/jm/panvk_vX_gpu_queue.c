@@ -81,7 +81,7 @@ panvk_overlap_enabled(void)
  * submits to keep the log small; determinism guarantees the first vectors
  * fault. */
 static unsigned g_fdiag_n;
-static void
+__attribute__((used, noinline, visibility("hidden"))) void
 panvk_fdiag_dump_jc(struct panvk_cmd_buffer *cmdbuf, const struct pan_jc *jc,
                     const char *tag, uint64_t atom)
 {

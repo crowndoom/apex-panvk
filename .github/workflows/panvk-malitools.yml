@@ -671,6 +671,28 @@ jobs:
           echo "==== libvulkan_panfrost.json ===="
           cat "$OUT/libvulkan_panfrost.json"
 
+          # ---- debug-marker audit --------------------------------------
+          # The linker has dead-stripped submit-path debug strings before
+          # (FDIAG hexdump in jm/panvk_vX_gpu_queue.c was compiled but
+          # produced no [FDIAG] lines at runtime). Fail the build if any
+          # expected marker is missing so this can never silently happen.
+          echo "==== debug-marker audit ===="
+          OK=0
+          for m in "PANVK] build=" "FDIAG/" "KFAULT" "APEXDIAG"; do
+            if strings -a "$OUT/libvulkan_panfrost.so" | grep -q "$m"; then
+              echo "marker present: $m"
+              OK=$((OK+1))
+            else
+              echo "marker MISSING: $m"
+            fi
+          done
+          if [[ "$OK" -eq 4 ]]; then
+            echo "ALL 4 debug markers present"
+          else
+            echo "ERROR: debug markers missing from the final .so ($OK/4)"
+            exit 1
+          fi
+
           # ---- bundle every dependency that is not an Android system lib --
           # The adrenotools hook creates a linker namespace whose search path
           # is this directory, so bundled sonames do resolve (ADPKG.md).
