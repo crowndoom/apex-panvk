@@ -1227,6 +1227,8 @@ kbase_kmod_alias_destroy(struct pan_kmod_dev *dev, uint64_t va, uint64_t size,
  * dependency-only atom (no GPU work) with stride 64. Kernels that expect
  * 56 (e.g. r49 on 6.6) answer with a config fault (0x40) or reject the
  * ioctl; then we switch to 56. PANVK_ATOM_STRIDE always wins. */
+static void kbase_kmod_selftest_writevalue(struct pan_kmod_dev *dev);
+
 static void
 kbase_probe_atom_stride(int fd)
 {
@@ -1483,6 +1485,8 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
          mesa_logd("kbase: KCPU queue unavailable: %s", strerror(errno));
       }
    }
+
+   kbase_kmod_selftest_writevalue(&kbase_dev->base);
 
    return &kbase_dev->base;
 
@@ -2652,6 +2656,105 @@ kbase_kmod_wait_atom(struct pan_kmod_dev *dev, uint64_t atom_number,
 {
    struct kbase_kmod_dev *kd = container_of(dev, struct kbase_kmod_dev, base);
    return kbase_wait_atom(kd, atom_number, timeout_ns);
+}
+
+/* ----------------------------------------------------------------------------
+ * On-device submission self-test (env PANVK_SELFTEST=1 at device creation).
+ *
+ * Replicates the proven "kbase_write_value_core_req_test.stride64_working"
+ * harness on the JM uAPI: allocate a target BO and a descriptor BO, pack a
+ * Job Header v9 WRITE_VALUE job (type = IMMEDIATE_64, value 0x2A2A2A2A) in
+ * the descriptor BO, submit it through the normal kbase_kmod_job_submit()
+ * path (core_req = CS), wait, and report both the kbase event code and the
+ * target word.  If this passes but real render work still reports
+ * [KFAULT] DATA_INVALID (0x58), the fault is in panvk's descriptor
+ * construction rather than in the kmod submit path. */
+static void
+kbase_kmod_selftest_writevalue(struct pan_kmod_dev *dev)
+{
+   static bool done;
+   if (done)
+      return;
+   done = true;
+
+   const char *env = getenv("PANVK_SELFTEST");
+   if (env && env[0] == '0')
+      return;
+
+   struct pan_kmod_bo *tgt = NULL;
+   struct pan_kmod_bo *dsc = NULL;
+   void *t_map = NULL;
+   void *d_map = NULL;
+   uint32_t event = 0;
+   uint64_t atom = 0;
+   int ok = 0;
+
+   tgt = pan_kmod_bo_alloc(dev, NULL, 4096, 0);
+   dsc = pan_kmod_bo_alloc(dev, NULL, 4096, 0);
+   if (!tgt || !dsc) {
+      dprintf(2, "[SELFTEST] bo_alloc failed\n");
+      goto out;
+   }
+   t_map = pan_kmod_bo_mmap(tgt, PROT_READ | PROT_WRITE, MAP_SHARED, NULL);
+   d_map = pan_kmod_bo_mmap(dsc, PROT_READ | PROT_WRITE, MAP_SHARED, NULL);
+   if (!t_map || !d_map) {
+      dprintf(2, "[SELFTEST] mmap failed\n");
+      goto out;
+   }
+   memset(t_map, 0, 4096);
+   memset(d_map, 0, 4096);
+
+   {
+      uint32_t *d = d_map;
+      uint64_t tgt_va = tgt->gpu_va;
+
+      /* Job header (v9): word 4 = type<<1 | index<<16, word 5 = dependency_1. */
+      d[4] = (2u /* WRITE_VALUE */ << 1);
+      d[5] = 0;
+      /* Payload: address (8B), type = IMMEDIATE_64, pad, immediate (8B). */
+      d[8] = (uint32_t)(tgt_va & 0xffffffff);
+      d[9] = (uint32_t)(tgt_va >> 32);
+      d[10] = 6;
+      d[11] = 0;
+      d[12] = 0x2A2A2A2A;
+      d[13] = 0;
+   }
+
+   /* Make the descriptor GPU-visible through the normal sync path. */
+   pan_kmod_queue_bo_map_sync(dsc, 0, d_map, 64,
+                              PAN_KMOD_BO_SYNC_CPU_CACHE_FLUSH);
+   pan_kmod_flush_bo_map_syncs(dev);
+
+   {
+      struct pan_kmod_bo *bos[1] = { dsc };
+      atom = kbase_kmod_job_submit(dev, dsc->gpu_va, BASE_JD_REQ_CS, bos, 1,
+                                   NULL, 0);
+   }
+   if (atom)
+      ok = kbase_kmod_wait_atom(dev, atom, 5000000000ll);
+
+   {
+      struct kbase_kmod_dev *kd =
+         container_of(dev, struct kbase_kmod_dev, base);
+      event = ok ? BASE_JD_EVENT_DONE : kd->last_event_code[atom & 0xff];
+   }
+
+   dprintf(2,
+           "[SELFTEST] WRITE_VALUE atom=%llu wait=%s event=0x%x target=0x%08x "
+           "tgt_gpu_va=0x%llx dsc_gpu_va=0x%llx\n",
+           (unsigned long long)atom, ok ? "ok" : "FAIL", event,
+           *(uint32_t *)t_map, (unsigned long long)tgt->gpu_va,
+           (unsigned long long)dsc->gpu_va);
+
+out:
+   if (t_map)
+      pan_kmod_bo_munmap(tgt, t_map, 4096);
+   if (d_map)
+      pan_kmod_bo_munmap(dsc, d_map, 4096);
+   if (dsc)
+      pan_kmod_bo_put(dsc);
+   if (tgt)
+      pan_kmod_bo_put(tgt);
 }
 
 const struct pan_kmod_ops kbase_kmod_ops = {
