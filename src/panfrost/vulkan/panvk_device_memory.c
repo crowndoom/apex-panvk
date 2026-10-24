@@ -525,8 +525,27 @@ panvk_GetMemoryFdPropertiesKHR(VkDevice _device,
    assert(handleType == VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT);
 
    struct pan_kmod_bo *bo = pan_kmod_bo_import(device->kmod.dev, fd);
-   if (!bo)
-      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+   if (!bo) {
+      /* Tolerant fallback: some vendor AHBs (e.g. MediaTek window buffers)
+       * carry fds that cannot be sized (lseek -> -1/ESPIPE), so the kmod
+       * import fails. Failing hard here aborts the whole external-memory
+       * chain down to the importer. Instead, report the full memory type
+       * mask; the actual memory import at allocation time still validates
+       * the fd for real.
+       */
+      static bool warned;
+      if (!warned) {
+         warned = true;
+         fprintf(stderr,
+                 "APEXDIAG GetFdProps: fd %d not importable, reporting full type mask\n",
+                 fd);
+      }
+      pMemoryFdProperties->memoryTypeBits =
+         phys_dev->memory.type_count >= 32
+            ? 0xffffffffu
+            : (BITFIELD_BIT(phys_dev->memory.type_count) - 1);
+      return VK_SUCCESS;
+   }
 
    pMemoryFdProperties->memoryTypeBits = 0;
 
