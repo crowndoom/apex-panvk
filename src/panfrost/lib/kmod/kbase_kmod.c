@@ -2687,6 +2687,8 @@ kbase_kmod_selftest_writevalue(struct pan_kmod_dev *dev)
    void *d_map = NULL;
    uint32_t event = 0;
    uint64_t atom = 0;
+   uint64_t tgt_va = 0;
+   uint64_t dsc_va = 0;
    int ok = 0;
 
    tgt = pan_kmod_bo_alloc(dev, NULL, 4096, 0);
@@ -2695,6 +2697,9 @@ kbase_kmod_selftest_writevalue(struct pan_kmod_dev *dev)
       dprintf(2, "[SELFTEST] bo_alloc failed\n");
       goto out;
    }
+   tgt_va = container_of(tgt, struct kbase_kmod_bo, base)->gpu_va;
+   dsc_va = container_of(dsc, struct kbase_kmod_bo, base)->gpu_va;
+
    t_map = pan_kmod_bo_mmap(tgt, PROT_READ | PROT_WRITE, MAP_SHARED, NULL);
    d_map = pan_kmod_bo_mmap(dsc, PROT_READ | PROT_WRITE, MAP_SHARED, NULL);
    if (!t_map || !d_map) {
@@ -2706,7 +2711,6 @@ kbase_kmod_selftest_writevalue(struct pan_kmod_dev *dev)
 
    {
       uint32_t *d = d_map;
-      uint64_t tgt_va = tgt->gpu_va;
 
       /* Job header (v9): word 4 = type<<1 | index<<16, word 5 = dependency_1. */
       d[4] = (2u /* WRITE_VALUE */ << 1);
@@ -2727,7 +2731,7 @@ kbase_kmod_selftest_writevalue(struct pan_kmod_dev *dev)
 
    {
       struct pan_kmod_bo *bos[1] = { dsc };
-      atom = kbase_kmod_job_submit(dev, dsc->gpu_va, BASE_JD_REQ_CS, bos, 1,
+      atom = kbase_kmod_job_submit(dev, dsc_va, BASE_JD_REQ_CS, bos, 1,
                                    NULL, 0);
    }
    if (atom)
@@ -2743,8 +2747,8 @@ kbase_kmod_selftest_writevalue(struct pan_kmod_dev *dev)
            "[SELFTEST] WRITE_VALUE atom=%llu wait=%s event=0x%x target=0x%08x "
            "tgt_gpu_va=0x%llx dsc_gpu_va=0x%llx\n",
            (unsigned long long)atom, ok ? "ok" : "FAIL", event,
-           *(uint32_t *)t_map, (unsigned long long)tgt->gpu_va,
-           (unsigned long long)dsc->gpu_va);
+           *(uint32_t *)t_map, (unsigned long long)tgt_va,
+           (unsigned long long)dsc_va);
 
 out:
    if (t_map)
