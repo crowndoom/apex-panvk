@@ -1,9 +1,9 @@
-/*
- * Copyright © 2026 Collabora, Ltd.
+﻿/*
+ * Copyright Â© 2026 Collabora, Ltd.
  * SPDX-License-Identifier: MIT
  *
  * kmod backend for the ARM Mali kbase kernel driver (/dev/mali*).
- * Targets the Bifrost/Valhall kbase driver r32p0–r44p0, both the JM
+ * Targets the Bifrost/Valhall kbase driver r32p0â€“r44p0, both the JM
  * (arch <= 9, uAPI 11.x) and CSF (arch >= 10, uAPI 1.x) flavours.
  *
  * Key architectural differences from the panthor / panfrost DRM backends
@@ -79,7 +79,7 @@ static inline int panvk_trace_on_(void) { static int v = -1; if (v < 0) { const 
  * blocks forever inside read() on the blocking kbase fd. */
 static pthread_mutex_t g_kbase_read_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Forward declaration — the full definition is at the end of this file. */
+/* Forward declaration â€” the full definition is at the end of this file. */
 const struct pan_kmod_ops kbase_kmod_ops;
 
 /* -------------------------------------------------------------------------
@@ -276,10 +276,10 @@ kbase_kmod_supports_dmabuf(const struct pan_kmod_dev *dev)
 /*
  * Each entry in the GPU props blob is encoded as:
  *   4 bytes header: (key << 2) | size_code
- *     size_code 0 → u8 (1 byte)
- *     size_code 1 → u16 (2 bytes)
- *     size_code 2 → u32 (4 bytes)
- *     size_code 3 → u64 (8 bytes)
+ *     size_code 0 â†’ u8 (1 byte)
+ *     size_code 1 â†’ u16 (2 bytes)
+ *     size_code 2 â†’ u32 (4 bytes)
+ *     size_code 3 â†’ u64 (8 bytes)
  *   N bytes value
  */
 static uint64_t
@@ -495,7 +495,9 @@ kbase_dev_query_props(struct kbase_kmod_dev *kbase_dev,
                                 PAN_KMOD_BO_FLAG_NO_MMAP |
                                 PAN_KMOD_BO_FLAG_WB_MMAP |
                                 PAN_KMOD_BO_FLAG_GPU_UNCACHED |
-                                PAN_KMOD_BO_FLAG_CSF_EVENT;
+                                PAN_KMOD_BO_FLAG_CSF_EVENT |
+                                PAN_KMOD_BO_FLAG_NO_DMA_HEAP |
+                                PAN_KMOD_BO_FLAG_NO_IO_COHERENT;
 }
 
 /* -------------------------------------------------------------------------
@@ -881,7 +883,7 @@ kbase_kmod_csf_wait_event(struct pan_kmod_dev *dev, int64_t timeout_ns)
    /* Block until the kernel has a CSF notification pending, then consume one
     * notification with read().  This is what drives kernel-side
     * servicing of the submitted work (tiler-heap OOM growth, sync-update
-    * wakeups, group scheduling) — a pure userspace spin on the seqno cell
+    * wakeups, group scheduling) â€” a pure userspace spin on the seqno cell
     * never gives the driver's event path a chance to run.  Mirrors
     * panfork's poll()+read() CSF wait model. */
    struct pollfd pfd = {
@@ -1164,7 +1166,7 @@ kbase_kmod_alias_create(struct pan_kmod_dev *dev, uint64_t bo_va,
     * outright ("err on fixed address"), so the kernel always picks the
     * address.  Callers only need the mapping to not cross a 4G boundary
     * (so ring wraparound can be done with 32-bit maths), which a
-    * kernel-picked address almost always satisfies — in the unlikely case
+    * kernel-picked address almost always satisfies â€” in the unlikely case
     * it doesn't, destroy the mapping and try again with a fresh alias
     * region. */
    for (unsigned attempt = 0; attempt < 16; attempt++) {
@@ -1270,7 +1272,7 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
    /* Version handshake.  This must be the very first ioctl on the fd; all
     * other ioctls return -EPERM until it succeeds.  The CSF flavour
     * (arch >= 10: G610/G710/...) uses ioctl nr 52, the JM flavour
-    * (arch <= 9) uses nr 0 — and each flavour rejects the other's number
+    * (arch <= 9) uses nr 0 â€” and each flavour rejects the other's number
     * with -EPERM, which is what makes this probe reliable.  We pass 0.0 and
     * let the kernel report the version it implements (CSF: 1.x, JM: 11.x,
     * legacy Midgard: 3.x). */
@@ -1362,7 +1364,7 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
    /* Initialise the JIT allocator.  This must happen before any allocation
     * is made: besides setting up JIT, on 64-bit clients this is what carves
     * the CUSTOM_VA zone out of the top of the SAME_VA zone
-    * (kbase_region_tracker_init_jit_64) — and kernel-internal allocations
+    * (kbase_region_tracker_init_jit_64) â€” and kernel-internal allocations
     * such as tiler heap contexts/chunks come from that zone, so without it
     * KBASE_IOCTL_CS_TILER_HEAP_INIT fails with ENOMEM.  Parameters match
     * panfork's.  Failure is non-fatal for enumeration but breaks tiler
@@ -1699,7 +1701,10 @@ kbase_kmod_import_dmabuf(struct pan_kmod_dev *dev,
    uint64_t import_flags =
       BASE_MEM_PROT_CPU_RD | BASE_MEM_PROT_CPU_WR |
       BASE_MEM_PROT_GPU_RD | BASE_MEM_PROT_GPU_WR |
-      BASE_MEM_IMPORT_SHARED | BASE_MEM_COHERENT_SYSTEM;
+      BASE_MEM_IMPORT_SHARED;
+
+   if (!(kmod_flags & PAN_KMOD_BO_FLAG_NO_IO_COHERENT))
+      import_flags |= BASE_MEM_COHERENT_SYSTEM;
 
    if (kmod_flags & PAN_KMOD_BO_FLAG_GPU_UNCACHED)
       import_flags |= BASE_MEM_UNCACHED_GPU;
@@ -1806,7 +1811,8 @@ kbase_kmod_bo_alloc(struct pan_kmod_dev *dev,
    if (!exclusive_vm && kbase_dev->dma_heap_fd >= 0 &&
        !(kmod_flags & (PAN_KMOD_BO_FLAG_EXECUTABLE |
                        PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT |
-                       PAN_KMOD_BO_FLAG_CSF_EVENT)))
+                       PAN_KMOD_BO_FLAG_CSF_EVENT |
+                       PAN_KMOD_BO_FLAG_NO_DMA_HEAP)))
       return kbase_kmod_bo_alloc_dmabuf(dev, size, kmod_flags);
 
    const uint64_t page_size = 4096;
@@ -1878,7 +1884,7 @@ kbase_kmod_bo_alloc(struct pan_kmod_dev *dev,
 
    /* Establish the CPU mapping right away:
     *  - for SAME_VA regions out.gpu_va is a cookie, and this mmap() is what
-    *    actually creates the region mapping — the returned CPU address IS
+    *    actually creates the region mapping â€” the returned CPU address IS
     *    the GPU VA;
     *  - for EXEC_VA-zone regions out.gpu_va is already a real GPU VA that
     *    doubles as the mmap offset.
@@ -2106,7 +2112,7 @@ kbase_kmod_flush_bo_map_syncs(struct pan_kmod_dev *dev)
    return 0;
 }
 
-/* Eviction hints — kbase does not expose a madvise ioctl in the userspace
+/* Eviction hints â€” kbase does not expose a madvise ioctl in the userspace
  * API so these are no-ops. */
 static void
 kbase_kmod_bo_make_evictable(UNUSED struct pan_kmod_bo *bo)
@@ -2681,84 +2687,117 @@ kbase_kmod_selftest_writevalue(struct pan_kmod_dev *dev)
    if (env && env[0] == '0')
       return;
 
-   struct pan_kmod_bo *tgt = NULL;
-   struct pan_kmod_bo *dsc = NULL;
-   void *t_map = NULL;
-   void *d_map = NULL;
-   uint32_t event = 0;
-   uint64_t atom = 0;
-   uint64_t tgt_va = 0;
-   uint64_t dsc_va = 0;
-   int ok = 0;
+   /* Isolation matrix: same WRITE_VALUE job submitted against different
+    * allocation/coherency configurations.  Flaky DATA_INVALID faults
+    * (0x58) disappear/fail depending on which of these knobs matters. */
+   static const struct {
+      const char *name;
+      uint32_t    flags;    /* PAN_KMOD_BO_FLAG_* for BOTH bos */
+      uint32_t    dsc_flags_extra; /* extra flags for the descriptor BO */
+   } variants[] = {
+      { "dmabuf-default",   0, 0 },
+      { "dmabuf-uncached",  0, PAN_KMOD_BO_FLAG_GPU_UNCACHED },
+      { "dmabuf-nosyscoh",  PAN_KMOD_BO_FLAG_NO_IO_COHERENT, 0 },
+      { "native-sameva",    PAN_KMOD_BO_FLAG_NO_DMA_HEAP, 0 },
+      { "native-uncached",  PAN_KMOD_BO_FLAG_NO_DMA_HEAP,
+        PAN_KMOD_BO_FLAG_GPU_UNCACHED },
+      { "dmabuf-default2",  0, 0 },    /* repeat: flake rate check */
+   };
 
-   tgt = pan_kmod_bo_alloc(dev, NULL, 4096, 0);
-   dsc = pan_kmod_bo_alloc(dev, NULL, 4096, 0);
-   if (!tgt || !dsc) {
-      dprintf(2, "[SELFTEST] bo_alloc failed\n");
-      goto out;
+   for (size_t v = 0; v < ARRAY_SIZE(variants); v++) {
+      struct pan_kmod_bo *tgt = NULL;
+      struct pan_kmod_bo *dsc = NULL;
+      void *t_map = NULL;
+      void *d_map = NULL;
+      uint32_t event = 0;
+      uint64_t atom = 0;
+      uint64_t tgt_va = 0;
+      uint64_t dsc_va = 0;
+      int wait_ok = 0;
+      bool submitted = false;
+
+      tgt = pan_kmod_bo_alloc(dev, NULL, 4096, variants[v].flags);
+      dsc = pan_kmod_bo_alloc(dev, NULL, 4096,
+                              variants[v].flags | variants[v].dsc_flags_extra);
+      if (!tgt || !dsc) {
+         dprintf(2, "[ST%zu/%s] bo_alloc failed\n", v, variants[v].name);
+         goto next;
+      }
+      tgt_va = container_of(tgt, struct kbase_kmod_bo, base)->gpu_va;
+      dsc_va = container_of(dsc, struct kbase_kmod_bo, base)->gpu_va;
+
+      t_map = pan_kmod_bo_mmap(tgt, PROT_READ | PROT_WRITE, MAP_SHARED, NULL);
+      d_map = pan_kmod_bo_mmap(dsc, PROT_READ | PROT_WRITE, MAP_SHARED, NULL);
+      if (!t_map || !d_map) {
+         dprintf(2, "[ST%zu/%s] mmap failed\n", v, variants[v].name);
+         goto next;
+      }
+      memset(t_map, 0, 4096);
+      memset(d_map, 0, 4096);
+
+      {
+         uint32_t *d = d_map;
+
+         /* Job header (v9): word 4 = type<<1 | index<<16,
+          * word 5 = dependency_1.  Payload: address (8B),
+          * type = IMMEDIATE_64, pad, immediate (8B). */
+         d[4] = (2u /* WRITE_VALUE */ << 1);
+         d[5] = 0;
+         d[8] = (uint32_t)(tgt_va & 0xffffffff);
+         d[9] = (uint32_t)(tgt_va >> 32);
+         d[10] = 6;
+         d[11] = 0;
+         d[12] = 0x2A2A2A2A;
+         d[13] = 0;
+      }
+
+      /* Make the descriptor GPU-visible through the normal sync path and
+       * echo the descriptor words the GPU will fetch. */
+      pan_kmod_queue_bo_map_sync(dsc, 0, d_map, 64,
+                                 PAN_KMOD_BO_SYNC_CPU_CACHE_FLUSH);
+      pan_kmod_flush_bo_map_syncs(dev);
+
+      {
+         uint32_t *d = d_map;
+         dprintf(2, "[ST%zu/%s] d_words= %08x %08x %08x %08x %08x %08x %08x "
+                    "%08x\n", v, variants[v].name, d[4], d[5], d[8], d[9],
+                 d[10], d[11], d[12], d[13]);
+      }
+
+      {
+         struct pan_kmod_bo *bos[1] = { dsc };
+         atom = kbase_kmod_job_submit(dev, dsc_va, BASE_JD_REQ_CS, bos, 1,
+                                      NULL, 0);
+         submitted = atom != 0;
+      }
+      if (submitted)
+         wait_ok = kbase_kmod_wait_atom(dev, atom, 2000000000ll);
+
+      {
+         struct kbase_kmod_dev *kd =
+            container_of(dev, struct kbase_kmod_dev, base);
+         event = wait_ok ? BASE_JD_EVENT_DONE :
+                           kd->last_event_code[atom & 0xff];
+      }
+
+      dprintf(2,
+              "[ST%zu/%s] atom=%llu wait=%s event=0x%x target=0x%08x "
+              "tgt_va=0x%llx dsc_va=0x%llx\n",
+              v, variants[v].name, (unsigned long long)atom,
+              wait_ok ? "ok" : "FAIL", event,
+              *(uint32_t *)t_map, (unsigned long long)tgt_va,
+              (unsigned long long)dsc_va);
+
+   next:
+      if (t_map)
+         pan_kmod_bo_munmap(tgt, t_map, 4096);
+      if (d_map)
+         pan_kmod_bo_munmap(dsc, d_map, 4096);
+      if (dsc)
+         pan_kmod_bo_put(dsc);
+      if (tgt)
+         pan_kmod_bo_put(tgt);
    }
-   tgt_va = container_of(tgt, struct kbase_kmod_bo, base)->gpu_va;
-   dsc_va = container_of(dsc, struct kbase_kmod_bo, base)->gpu_va;
-
-   t_map = pan_kmod_bo_mmap(tgt, PROT_READ | PROT_WRITE, MAP_SHARED, NULL);
-   d_map = pan_kmod_bo_mmap(dsc, PROT_READ | PROT_WRITE, MAP_SHARED, NULL);
-   if (!t_map || !d_map) {
-      dprintf(2, "[SELFTEST] mmap failed\n");
-      goto out;
-   }
-   memset(t_map, 0, 4096);
-   memset(d_map, 0, 4096);
-
-   {
-      uint32_t *d = d_map;
-
-      /* Job header (v9): word 4 = type<<1 | index<<16, word 5 = dependency_1. */
-      d[4] = (2u /* WRITE_VALUE */ << 1);
-      d[5] = 0;
-      /* Payload: address (8B), type = IMMEDIATE_64, pad, immediate (8B). */
-      d[8] = (uint32_t)(tgt_va & 0xffffffff);
-      d[9] = (uint32_t)(tgt_va >> 32);
-      d[10] = 6;
-      d[11] = 0;
-      d[12] = 0x2A2A2A2A;
-      d[13] = 0;
-   }
-
-   /* Make the descriptor GPU-visible through the normal sync path. */
-   pan_kmod_queue_bo_map_sync(dsc, 0, d_map, 64,
-                              PAN_KMOD_BO_SYNC_CPU_CACHE_FLUSH);
-   pan_kmod_flush_bo_map_syncs(dev);
-
-   {
-      struct pan_kmod_bo *bos[1] = { dsc };
-      atom = kbase_kmod_job_submit(dev, dsc_va, BASE_JD_REQ_CS, bos, 1,
-                                   NULL, 0);
-   }
-   if (atom)
-      ok = kbase_kmod_wait_atom(dev, atom, 5000000000ll);
-
-   {
-      struct kbase_kmod_dev *kd =
-         container_of(dev, struct kbase_kmod_dev, base);
-      event = ok ? BASE_JD_EVENT_DONE : kd->last_event_code[atom & 0xff];
-   }
-
-   dprintf(2,
-           "[SELFTEST] WRITE_VALUE atom=%llu wait=%s event=0x%x target=0x%08x "
-           "tgt_gpu_va=0x%llx dsc_gpu_va=0x%llx\n",
-           (unsigned long long)atom, ok ? "ok" : "FAIL", event,
-           *(uint32_t *)t_map, (unsigned long long)tgt_va,
-           (unsigned long long)dsc_va);
-
-out:
-   if (t_map)
-      pan_kmod_bo_munmap(tgt, t_map, 4096);
-   if (d_map)
-      pan_kmod_bo_munmap(dsc, d_map, 4096);
-   if (dsc)
-      pan_kmod_bo_put(dsc);
-   if (tgt)
-      pan_kmod_bo_put(tgt);
 }
 
 const struct pan_kmod_ops kbase_kmod_ops = {

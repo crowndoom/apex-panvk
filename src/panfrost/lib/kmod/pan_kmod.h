@@ -137,6 +137,13 @@ enum pan_kmod_bo_flags {
 
    /* kbase CSF event memory monitored for cross-CSG synchronization. */
    PAN_KMOD_BO_FLAG_CSF_EVENT = BITFIELD_BIT(8),
+
+   /* Backend-private tuning flags (used by the kbase self-test matrix).
+    * Not part of the public API contract. */
+   /* Bypass the dma-heap import path and use the backend-native allocation. */
+   PAN_KMOD_BO_FLAG_NO_DMA_HEAP = BITFIELD_BIT(9),
+   /* Drop the system-IO-coherent claim on imported memory. */
+   PAN_KMOD_BO_FLAG_NO_IO_COHERENT = BITFIELD_BIT(10),
 };
 
 /* Allowed group priority flags. */
