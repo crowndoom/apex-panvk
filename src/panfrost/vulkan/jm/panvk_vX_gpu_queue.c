@@ -77,37 +77,38 @@ panvk_overlap_enabled(void)
 
 /* FDIAG (temporary): dump the job descriptor words the GPU will fetch for a
  * jc chain, plus the descriptor BO cache properties, so submit-side contents
- * can be correlated with [KFAULT] atom numbers. Capped to the first few
- * submits to keep the log small; determinism guarantees the first vectors
- * fault. */
+ * can be correlated with [KFAULT] atom numbers. Implemented as inline blocks
+ * at the four submit call sites (NOT as a static helper function): a static
+ * helper for this vanished from the final .so once (symbols kept, code and
+ * strings dead-stripped), so the code lives directly in
+ * panvk_queue_submit_batch. Capped to the first few dumps; determinism
+ * guarantees the first faulting vectors are captured. */
 static unsigned g_fdiag_n;
-__attribute__((used, noinline, visibility("hidden"))) void
-panvk_fdiag_dump_jc(struct panvk_cmd_buffer *cmdbuf, const struct pan_jc *jc,
-                    const char *tag, uint64_t atom)
-{
-   if (g_fdiag_n >= 8 || jc->first_job == 0)
-      return;
-
-   list_for_each_entry(struct panvk_priv_bo, bo, &cmdbuf->desc_pool.bos, node) {
-      if (jc->first_job >= bo->addr.dev &&
-          jc->first_job + 64 <= bo->addr.dev + pan_kmod_bo_size(bo->bo)) {
-         const uint32_t *w =
-            (const uint32_t *)((const uint8_t *)bo->addr.host +
-                               (size_t)(jc->first_job - bo->addr.dev));
-         fprintf(stderr, "[FDIAG/%s] jc=0x%016llx atom=%u bo_flags=0x%x words=",
-                 tag, (unsigned long long)jc->first_job, (unsigned)atom,
-                 bo->bo->flags);
-         for (unsigned i = 0; i < 16; i++)
-            fprintf(stderr, "%08x%s", w[i], i == 3 || i == 7 || i == 11 ? " " : "");
-         fprintf(stderr, "\n");
-         g_fdiag_n++;
-         return;
-      }
-   }
-   fprintf(stderr, "[FDIAG/%s] jc=0x%016llx NOT in any desc_pool bo\n",
-           tag, (unsigned long long)jc->first_job);
-   g_fdiag_n++;
-}
+#define PANVK_FDIAG_DUMP(pool_, jc_, tag_, atom_)                             \
+   do {                                                                       \
+      if (g_fdiag_n < 8 && (jc_)->first_job != 0) {                           \
+         list_for_each_entry(struct panvk_priv_bo, bo,                        \
+                             &(pool_).bos, node) {                            \
+            if ((jc_)->first_job >= bo->addr.dev &&                          \
+                (jc_)->first_job + 64 <=                                      \
+                bo->addr.dev + pan_kmod_bo_size(bo->bo)) {                    \
+               const uint32_t *w =                                            \
+                  (const uint32_t *)((const uint8_t *)bo->addr.host +         \
+                  (size_t)((jc_)->first_job - bo->addr.dev));                 \
+               fprintf(stderr, "[FDIAG/%s] jc=0x%016llx atom=%u "             \
+                       "bo_flags=0x%x words=", tag_,                          \
+                       (unsigned long long)(jc_)->first_job,                  \
+                       (unsigned)(atom_), bo->bo->flags);                     \
+               for (unsigned fd_i = 0; fd_i < 16; fd_i++)                     \
+                  fprintf(stderr, "%08x%s", w[fd_i],                          \
+                          (fd_i == 3 || fd_i == 7 || fd_i == 11) ? " " : "");\
+               fprintf(stderr, "\n");                                         \
+               g_fdiag_n++;                                                   \
+               break;                                                         \
+            }                                                                 \
+         }                                                                    \
+      }                                                                       \
+   } while (0)
 
 static uint64_t
 panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
@@ -158,7 +159,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
             }
             kbase_kmod_job_submit_retry(dev->kmod.dev, batch->vtc_jc.first_job,
                                         vtc_core_req, bos, nr_bos, NULL, 0, 5);
-            panvk_fdiag_dump_jc(cmdbuf, &batch->vtc_jc, "vtc-warm", 0);
+            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc-warm", 0);
             vtc_atom = 0; /* already waited for */
             queue->warmed_up = true;
          } else {
@@ -171,7 +172,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
                 BASE_JD_DEP_TYPE_ORDER, v67_ov ? queue->last_vtc_atom : queue->in_dep,
                 BASE_JD_DEP_TYPE_ORDER,
                 batch->frag_jc.first_job != 0 && queue->frag_warmed_up);
-            panvk_fdiag_dump_jc(cmdbuf, &batch->vtc_jc, "vtc", vtc_atom);
+            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc", vtc_atom);
             assert(vtc_atom);
             queue->last_vtc_atom = vtc_atom; /* v67b */
             queue->in_dep = 0;
@@ -225,7 +226,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
          bool ok = kbase_kmod_job_submit_retry(
             dev->kmod.dev, batch->frag_jc.first_job, BASE_JD_REQ_FS,
             bos, nr_bos, NULL, 0, 5);
-         panvk_fdiag_dump_jc(cmdbuf, &batch->frag_jc, "frag-warm", 0);
+         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag-warm", 0);
          queue->frag_warmed_up = true;
          (void)0;
          frag_atom = 0;
@@ -237,7 +238,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
                                              (panvk_overlap_enabled() && vtc_atom && !queue->in_dep)
                                                 ? queue->last_frag_atom : queue->in_dep, /* v67b */
                                              BASE_JD_DEP_TYPE_ORDER, false);
-         panvk_fdiag_dump_jc(cmdbuf, &batch->frag_jc, "frag", frag_atom);
+         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag", frag_atom);
          assert(frag_atom);
          queue->half_frag_atom[batch->heap_half & 1] = frag_atom; /* v67b */
          queue->last_frag_atom = frag_atom; queue->last_any_atom = frag_atom;
