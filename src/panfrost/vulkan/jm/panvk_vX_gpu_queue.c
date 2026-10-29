@@ -77,11 +77,14 @@ panvk_overlap_enabled(void)
 
 /* FDIAG (temporary): dump the job descriptor words the GPU will fetch for a
  * jc chain, plus the descriptor BO cache properties, so submit-side contents
- * can be correlated with [KFAULT] atom numbers. Implemented as inline blocks
- * at the four submit call sites (NOT as a static helper function): a static
- * helper for this vanished from the final .so once (symbols kept, code and
- * strings dead-stripped), so the code lives directly in
- * panvk_queue_submit_batch. Capped to the first few dumps; determinism
+ * can be correlated with [KFAULT] atom numbers. ROOT CAUSE of the earlier
+ * "FDIAG vanished from the final .so" mystery is in THIS file: the
+ * PANVK_TRACE gate at the top #defines fprintf(stderr,...) to a constant 0
+ * unless -DPANVK_TRACE_BUILD, so every stderr print in this file was
+ * compiled out (only the g_fdiag_n counter survived). The dump calls thus
+ * use (fprintf)(...) -- the parenthesized idiom suppresses the gating
+ * macro and calls the real stdio function. Inline blocks at the four
+ * submit call sites; capped to the first few dumps; determinism
  * guarantees the first faulting vectors are captured. */
 static unsigned g_fdiag_n;
 #define PANVK_FDIAG_DUMP(pool_, jc_, tag_, atom_)                             \
@@ -95,14 +98,14 @@ static unsigned g_fdiag_n;
                const uint32_t *w =                                            \
                   (const uint32_t *)((const uint8_t *)bo->addr.host +         \
                   (size_t)((jc_)->first_job - bo->addr.dev));                 \
-               fprintf(stderr, "[FDIAG/%s] jc=0x%016llx atom=%u "             \
+               (fprintf)(stderr, "[FDIAG/%s] jc=0x%016llx atom=%u "           \
                        "bo_flags=0x%x words=", tag_,                          \
                        (unsigned long long)(jc_)->first_job,                  \
                        (unsigned)(atom_), bo->bo->flags);                     \
                for (unsigned fd_i = 0; fd_i < 16; fd_i++)                     \
-                  fprintf(stderr, "%08x%s", w[fd_i],                          \
+                  (fprintf)(stderr, "%08x%s", w[fd_i],                        \
                           (fd_i == 3 || fd_i == 7 || fd_i == 11) ? " " : "");\
-               fprintf(stderr, "\n");                                         \
+               (fprintf)(stderr, "\n");                                       \
                g_fdiag_n++;                                                   \
                break;                                                         \
             }                                                                 \
