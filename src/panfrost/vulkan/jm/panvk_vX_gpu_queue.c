@@ -83,13 +83,16 @@ panvk_overlap_enabled(void)
  * unless -DPANVK_TRACE_BUILD, so every stderr print in this file was
  * compiled out (only the g_fdiag_n counter survived). The dump calls thus
  * use (fprintf)(...) -- the parenthesized idiom suppresses the gating
- * macro and calls the real stdio function. Inline blocks at the four
- * submit call sites; capped to the first few dumps; determinism
- * guarantees the first faulting vectors are captured. */
+ * macro and calls the real stdio function. v9 Malloc Vertex Jobs are 384
+ * bytes and the pass/fail atoms are identical in words 0-15, so the dump
+ * also follows the job's Tiler Pointer (offset 56) for vtc and Fragment
+ * Job's Framebuffer pointer (offset 32+8: words 10-11) for frag, and lists
+ * the first submitted BOs. tgt_off_ = byte offset of the 64-bit pointer
+ * field to follow inside the descriptor; 0 disables the follow. */
 static unsigned g_fdiag_n;
-#define PANVK_FDIAG_DUMP(pool_, jc_, tag_, atom_)                             \
+#define PANVK_FDIAG_DUMP(pool_, jc_, tag_, atom_, tgt_off_, bos_, nr_bos_)    \
    do {                                                                       \
-      if (g_fdiag_n < 8 && (jc_)->first_job != 0) {                           \
+      if (g_fdiag_n < 12 && (jc_)->first_job != 0) {                          \
          list_for_each_entry(struct panvk_priv_bo, bo,                        \
                              &(pool_).bos, node) {                            \
             if ((jc_)->first_job >= bo->addr.dev &&                          \
@@ -106,6 +109,40 @@ static unsigned g_fdiag_n;
                   (fprintf)(stderr, "%08x%s", w[fd_i],                        \
                           (fd_i == 3 || fd_i == 7 || fd_i == 11) ? " " : "");\
                (fprintf)(stderr, "\n");                                       \
+               if ((tgt_off_) != 0) {                                         \
+                  uint64_t fd_t =                                             \
+                     (uint64_t)w[(tgt_off_) >> 2] |                           \
+                     ((uint64_t)w[((tgt_off_) >> 2) + 1] << 32);              \
+                  if (fd_t >= bo->addr.dev &&                                 \
+                      fd_t + 64 <=                                            \
+                      bo->addr.dev + pan_kmod_bo_size(bo->bo)) {              \
+                     const uint32_t *tw =                                     \
+                        (const uint32_t *)                                    \
+                        ((const uint8_t *)bo->addr.host +                     \
+                        (size_t)(fd_t - bo->addr.dev));                       \
+                     (fprintf)(stderr, "[FDIAG/%s] tgt=0x%016llx words=",     \
+                             tag_, (unsigned long long)fd_t);                 \
+                     for (unsigned fd_i = 0; fd_i < 16; fd_i++)               \
+                        (fprintf)(stderr, "%08x%s", tw[fd_i],                 \
+                                (fd_i == 3 || fd_i == 7 || fd_i == 11)        \
+                                ? " " : "");                                  \
+                     (fprintf)(stderr, "\n");                                 \
+                  } else {                                                    \
+                     (fprintf)(stderr, "[FDIAG/%s] tgt=0x%016llx NOT INT\n",  \
+                             tag_, (unsigned long long)fd_t);                 \
+                  }                                                           \
+               }                                                              \
+               if ((nr_bos_) != 0) {                                          \
+                  (fprintf)(stderr, "[FDIAG/%s] bos(%u)=", tag_,              \
+                          (unsigned)(nr_bos_));                               \
+                  for (unsigned fd_b = 0;                                     \
+                       fd_b < 6 && fd_b < (unsigned)(nr_bos_); fd_b++)        \
+                      (fprintf)(stderr, " h%u:0x%x:%luK",                      \
+                              (bos_)[fd_b]->handle, (bos_)[fd_b]->flags,       \
+                              (unsigned long)                                  \
+                              (pan_kmod_bo_size((bos_)[fd_b]) >> 10));         \
+                  (fprintf)(stderr, "\n");                                    \
+               }                                                              \
                g_fdiag_n++;                                                   \
                break;                                                         \
             }                                                                 \
@@ -162,7 +199,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
             }
             kbase_kmod_job_submit_retry(dev->kmod.dev, batch->vtc_jc.first_job,
                                         vtc_core_req, bos, nr_bos, NULL, 0, 5);
-            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc-warm", 0);
+            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc-warm", 0, 56, bos, nr_bos);
             vtc_atom = 0; /* already waited for */
             queue->warmed_up = true;
          } else {
@@ -175,7 +212,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
                 BASE_JD_DEP_TYPE_ORDER, v67_ov ? queue->last_vtc_atom : queue->in_dep,
                 BASE_JD_DEP_TYPE_ORDER,
                 batch->frag_jc.first_job != 0 && queue->frag_warmed_up);
-            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc", vtc_atom);
+            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc", vtc_atom, 56, bos, nr_bos);
             assert(vtc_atom);
             queue->last_vtc_atom = vtc_atom; /* v67b */
             queue->in_dep = 0;
@@ -229,7 +266,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
          bool ok = kbase_kmod_job_submit_retry(
             dev->kmod.dev, batch->frag_jc.first_job, BASE_JD_REQ_FS,
             bos, nr_bos, NULL, 0, 5);
-         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag-warm", 0);
+         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag-warm", 0, 40, bos, nr_bos);
          queue->frag_warmed_up = true;
          (void)0;
          frag_atom = 0;
@@ -241,7 +278,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
                                              (panvk_overlap_enabled() && vtc_atom && !queue->in_dep)
                                                 ? queue->last_frag_atom : queue->in_dep, /* v67b */
                                              BASE_JD_DEP_TYPE_ORDER, false);
-         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag", frag_atom);
+         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag", frag_atom, 40, bos, nr_bos);
          assert(frag_atom);
          queue->half_frag_atom[batch->heap_half & 1] = frag_atom; /* v67b */
          queue->last_frag_atom = frag_atom; queue->last_any_atom = frag_atom;
