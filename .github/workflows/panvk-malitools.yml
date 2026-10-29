@@ -35,6 +35,13 @@ on:
         type: boolean
         required: false
         default: false
+  # (temp) api.github.com unreachable from phone-side network; push-triggered
+  # builds keep the ADPKG pipeline out on git-only connectivity. Remove once
+  # API access returns.
+  push:
+    branches:
+      - master
+
 
 permissions:
   contents: write
@@ -74,7 +81,7 @@ jobs:
           case "${{ github.event.inputs.build_type }}" in
             release)        TYPES='["release"]' ;;
             debugoptimized) TYPES='["debugoptimized"]' ;;
-            *)              TYPES='["debugoptimized","release"]' ;;
+            *)              TYPES='["release"]' ;;
           esac
           echo "types=$TYPES" >> "$GITHUB_OUTPUT"
 
