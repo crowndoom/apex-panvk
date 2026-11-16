@@ -88,9 +88,17 @@ panvk_overlap_enabled(void)
  * also follows the job's Tiler Pointer (offset 56) for vtc and Fragment
  * Job's Framebuffer pointer (offset 32+8: words 10-11) for frag, and lists
  * the first submitted BOs. tgt_off_ = byte offset of the 64-bit pointer
- * field to follow inside the descriptor; 0 disables the follow. */
+ * field to follow inside the descriptor; 0 disables the follow.
+ * v2.1: xtra_ != 0 (vtc only) additionally dumps the Tiler Context's
+ * GPU-mutated regions that a RECYCLED desc-pool block carries over:
+ *   st=   Tiler State  (ctx + 0x80, words 32-47) -- written by the GPU
+ *         every tiling run; stale if the packer's ctx template copy is
+ *         shorter than the full 192-byte context.
+ *   heap= Tiler Heap descriptor (32 B) at the ctx's Heap pointer (ctx
+ *         words 6-7) -- GPU mutates Bottom/Top free-list state per run. */
 static unsigned g_fdiag_n;
-#define PANVK_FDIAG_DUMP(pool_, jc_, tag_, atom_, tgt_off_, bos_, nr_bos_)    \
+#define PANVK_FDIAG_DUMP(pool_, jc_, tag_, atom_, tgt_off_, xtra_, bos_,      \
+                         nr_bos_)                                             \
    do {                                                                       \
       if (g_fdiag_n < 12 && (jc_)->first_job != 0) {                          \
          list_for_each_entry(struct panvk_priv_bo, bo,                        \
@@ -127,6 +135,42 @@ static unsigned g_fdiag_n;
                                 (fd_i == 3 || fd_i == 7 || fd_i == 11)        \
                                 ? " " : "");                                  \
                      (fprintf)(stderr, "\n");                                 \
+                     if ((xtra_) != 0 &&                                      \
+                         fd_t + 192 <=                                        \
+                         bo->addr.dev + pan_kmod_bo_size(bo->bo)) {           \
+                        /* Tiler State = ctx words 32-47 (ctx + 0x80). */     \
+                        const uint32_t *fd_sw = tw + 32;                      \
+                        (fprintf)(stderr, "[FDIAG/%s] st=0x%016llx words=",   \
+                                tag_,                                         \
+                                (unsigned long long)(fd_t + 128));            \
+                        for (unsigned fd_i = 0; fd_i < 16; fd_i++)            \
+                           (fprintf)(stderr, "%08x%s", fd_sw[fd_i],           \
+                                   (fd_i == 3 || fd_i == 7 || fd_i == 11)     \
+                                   ? " " : "");                               \
+                        (fprintf)(stderr, "\n");                              \
+                        /* Tiler Heap desc (32 B) at ctx words 6-7. */        \
+                        uint64_t fd_h =                                       \
+                           (uint64_t)tw[6] | ((uint64_t)tw[7] << 32);         \
+                        if (fd_h >= bo->addr.dev &&                           \
+                            fd_h + 32 <=                                      \
+                            bo->addr.dev + pan_kmod_bo_size(bo->bo)) {        \
+                           const uint32_t *fd_hw =                            \
+                              (const uint32_t *)                              \
+                              ((const uint8_t *)bo->addr.host +               \
+                              (size_t)(fd_h - bo->addr.dev));                 \
+                           (fprintf)(stderr,                                  \
+                                   "[FDIAG/%s] heap=0x%016llx words=",        \
+                                   tag_, (unsigned long long)fd_h);           \
+                           for (unsigned fd_i = 0; fd_i < 8; fd_i++)          \
+                              (fprintf)(stderr, "%08x%s", fd_hw[fd_i],        \
+                                      (fd_i == 3) ? " " : "");                \
+                           (fprintf)(stderr, "\n");                           \
+                        } else {                                              \
+                           (fprintf)(stderr,                                  \
+                                   "[FDIAG/%s] heap=0x%016llx NOT INT\n",     \
+                                   tag_, (unsigned long long)fd_h);           \
+                        }                                                     \
+                     }                                                        \
                   } else {                                                    \
                      (fprintf)(stderr, "[FDIAG/%s] tgt=0x%016llx NOT INT\n",  \
                              tag_, (unsigned long long)fd_t);                 \
@@ -199,7 +243,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
             }
             kbase_kmod_job_submit_retry(dev->kmod.dev, batch->vtc_jc.first_job,
                                         vtc_core_req, bos, nr_bos, NULL, 0, 5);
-            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc-warm", 0, 56, bos, nr_bos);
+            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc-warm", 0, 56, 1, bos, nr_bos);
             vtc_atom = 0; /* already waited for */
             queue->warmed_up = true;
          } else {
@@ -212,7 +256,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
                 BASE_JD_DEP_TYPE_ORDER, v67_ov ? queue->last_vtc_atom : queue->in_dep,
                 BASE_JD_DEP_TYPE_ORDER,
                 batch->frag_jc.first_job != 0 && queue->frag_warmed_up);
-            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc", vtc_atom, 56, bos, nr_bos);
+            PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->vtc_jc, "vtc", vtc_atom, 56, 1, bos, nr_bos);
             assert(vtc_atom);
             queue->last_vtc_atom = vtc_atom; /* v67b */
             queue->in_dep = 0;
@@ -266,7 +310,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
          bool ok = kbase_kmod_job_submit_retry(
             dev->kmod.dev, batch->frag_jc.first_job, BASE_JD_REQ_FS,
             bos, nr_bos, NULL, 0, 5);
-         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag-warm", 0, 40, bos, nr_bos);
+         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag-warm", 0, 40, 0, bos, nr_bos);
          queue->frag_warmed_up = true;
          (void)0;
          frag_atom = 0;
@@ -278,7 +322,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
                                              (panvk_overlap_enabled() && vtc_atom && !queue->in_dep)
                                                 ? queue->last_frag_atom : queue->in_dep, /* v67b */
                                              BASE_JD_DEP_TYPE_ORDER, false);
-         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag", frag_atom, 40, bos, nr_bos);
+         PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag", frag_atom, 40, 0, bos, nr_bos);
          assert(frag_atom);
          queue->half_frag_atom[batch->heap_half & 1] = frag_atom; /* v67b */
          queue->last_frag_atom = frag_atom; queue->last_any_atom = frag_atom;
