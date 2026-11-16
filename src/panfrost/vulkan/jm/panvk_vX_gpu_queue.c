@@ -206,26 +206,38 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
    uint64_t vtc_atom = 0, frag_atom = 0;
    (void)0;
 
-   /* Reset the batch if it's already been issued */
-   if (batch->issued) {
-      util_dynarray_foreach(&batch->jobs, void *, job)
-         memset((*job), 0, 4 * 4);
+   /* ROOT CAUSE FIX (0x58 DATA_INVALID_FAULT on recycled desc-pool
+    * blocks): the JD header (first 16 bytes = exception-status word +
+    * jc pointer the GPU writes back) is NOT covered by the job packers
+    * (they start at word 4), and desc-pool block memory is recycled
+    * across submissions AND across driver instances without zeroing.
+    * A recycled block whose previous occupant faulted carries
+    * exception status 0x58 plus a self-referencing jc pointer; the GPU
+    * treats such a JD as a job to resume and faults immediately with
+    * the same 0x58. Observed 6/6: stale 0x58 header -> KFAULT, stale
+    * 0x00/0x01 -> pass, including a block whose tiler ctx/heap state
+    * was entirely stale (so the header is the sole trigger). The old
+    * code only cleared the header on the batch->issued reissue path,
+    * which never runs for per-frame fresh records into wrapped pool
+    * blocks. Clear the header on EVERY submit, re-copy the tiler
+    * templates exactly as the reissue path did, and flush the pool
+    * maps so the GPU observes the zeroes. */
+   util_dynarray_foreach(&batch->jobs, void *, job)
+      memset((*job), 0, 4 * 4);
 
-      /* Reset the tiler before re-issuing the batch */
-      if (batch->tiler.ctx_descs.cpu) {
-         memcpy(batch->tiler.heap_desc.cpu, &batch->tiler.heap_templ,
-                sizeof(batch->tiler.heap_templ));
+   if (batch->tiler.ctx_descs.cpu) {
+      memcpy(batch->tiler.heap_desc.cpu, &batch->tiler.heap_templ,
+             sizeof(batch->tiler.heap_templ));
 
-         struct mali_tiler_context_packed *ctxs = batch->tiler.ctx_descs.cpu;
+      struct mali_tiler_context_packed *ctxs = batch->tiler.ctx_descs.cpu;
 
-         for (uint32_t i = 0; i < batch->fb.layer_count; i++)
-            memcpy(&ctxs[i], &batch->tiler.ctx_templ, sizeof(*ctxs));
-      }
-
-      /* We don't keep track of BO <-> job relationship, so let's just flush the
-       * whole desc pool for now. */
-      panvk_pool_flush_maps(&cmdbuf->desc_pool);
+      for (uint32_t i = 0; i < batch->fb.layer_count; i++)
+         memcpy(&ctxs[i], &batch->tiler.ctx_templ, sizeof(*ctxs));
    }
+
+   /* We don't keep track of BO <-> job relationship, so let's just flush the
+    * whole desc pool for now. */
+   panvk_pool_flush_maps(&cmdbuf->desc_pool);
 
    /* Flush pending synchronization requests before submitting the job, to
     * make sure things are GPU-visible. */
