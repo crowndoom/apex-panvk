@@ -261,6 +261,18 @@ jobs:
         working-directory: mesa-src
         run: |
           set -euo pipefail
+          # Pin LLVM 18 for the HOST build. The runner image ships a newer
+          # LLVM (22.x) earlier in PATH, and mesa requires LLVMSPIRVLib to
+          # match the chosen LLVM major.minor exactly (meson.build:2077:
+          # ">= <maj>.<min>" and "< <maj>.<min+1>"). We install
+          # libllvmspirvlib-18-dev (translator 18.1), so LLVM must resolve
+          # to 18.x or meson hard-fails with "need >= 22.1 found 18.1.0.0".
+          export PATH="/usr/lib/llvm-18/bin:$PATH"
+          export LLVM_CONFIG=/usr/lib/llvm-18/bin/llvm-config
+          echo "==== LLVM pin ===="
+          echo "llvm-config (PATH): $(command -v llvm-config) -> $(llvm-config --version)"
+          echo "LLVMSPIRVLib: $(pkg-config --modversion LLVMSPIRVLib)"
+          echo "clang: $(command -v clang || echo none)"
           meson setup build-host \
               -Dplatforms=[] \
               -Dgallium-drivers=[] \
