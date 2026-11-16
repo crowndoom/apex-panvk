@@ -66,7 +66,7 @@ static inline int panvk_trace_on_(void) { static int v = -1; if (v < 0) { const 
  * cmd_buffer.c's heap-half split calls it so both sides always agree. */
 #include <stdlib.h>
 bool
-panvk_overlap_enabled(void)
+panvk_per_arch(panvk_overlap_enabled)(void)
 {
    static int on = -1;
    if (on < 0) {
@@ -273,7 +273,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
             queue->warmed_up = true;
          } else {
          uint32_t vtc_core_req = (BASE_JD_REQ_CS | BASE_JD_REQ_T | BASE_JD_REQ_V);
-            const bool v67_ov = panvk_overlap_enabled() && batch->frag_jc.first_job &&
+            const bool v67_ov = panvk_per_arch(panvk_overlap_enabled)() && batch->frag_jc.first_job &&
                                 !queue->in_dep && queue->frag_warmed_up; /* v67b */
             vtc_atom = kbase_kmod_job_submit_dep(dev->kmod.dev, batch->vtc_jc.first_job, vtc_core_req, bos, nr_bos,
                 (v67_ov ? queue->half_frag_atom[batch->heap_half & 1] : /* v67b */
@@ -344,7 +344,7 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
                                              BASE_JD_REQ_FS, bos, nr_bos,
                                              vtc_atom ? vtc_atom : queue->last_any_atom,
                                              vtc_atom ? BASE_JD_DEP_TYPE_DATA : BASE_JD_DEP_TYPE_ORDER,
-                                             (panvk_overlap_enabled() && vtc_atom && !queue->in_dep)
+                                             (panvk_per_arch(panvk_overlap_enabled)() && vtc_atom && !queue->in_dep)
                                                 ? queue->last_frag_atom : queue->in_dep, /* v67b */
                                              BASE_JD_DEP_TYPE_ORDER, false);
          PANVK_FDIAG_DUMP(cmdbuf->desc_pool, &batch->frag_jc, "frag", frag_atom, 40, 0, bos, nr_bos);

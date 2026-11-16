@@ -138,10 +138,10 @@ struct panvk_batch *
    panvk_per_arch(cmd_open_batch)(struct panvk_cmd_buffer *cmdbuf);
 
 /* v67b: vertex/tiler work overlaps the previous pass (PANVK_OVERLAP=1: on;
- * default OFF). Defined in panvk_vX_gpu_queue.c and shared with
+ * default OFF). Defined per-arch in panvk_vX_gpu_queue.c and shared with
  * panvk_vX_cmd_buffer.c so the heap-half split and the submit-side
  * dependency wiring always answer identically. */
-bool panvk_overlap_enabled(void);
+bool panvk_per_arch(panvk_overlap_enabled)(void);
 
 void panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf);
 
