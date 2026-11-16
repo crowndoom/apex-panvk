@@ -2596,6 +2596,11 @@ kbase_kmod_job_submit(struct pan_kmod_dev *dev,
       .nr_atoms = 1,
       .stride = kbase_atom_stride(),
    };
+   g_atom_req[atom.atom_number] = core_req;
+   static int ksub_n;
+   if (ksub_n++ < 64)
+      dprintf(2, "[KSUB] atom=%u jc=0x%llx req=0x%x dep=none\n",
+              (unsigned)atom.atom_number, (unsigned long long)jc, core_req);
    if (ioctl(dev->fd, KBASE_IOCTL_JOB_SUBMIT, &sub) < 0) {
       mesa_loge("kbase: JOB_SUBMIT err=%d", errno);
       simple_mtx_lock(&kd->atoms_lock);
@@ -2647,7 +2652,14 @@ kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc, uint32_t core_r
       .nr_atoms = 1,
       .stride = kbase_atom_stride(),
    };
-   (void)0;
+   static int ksub_n;
+   if (ksub_n++ < 64)
+      dprintf(2, "[KSUB] atom=%u jc=0x%llx req=0x%x dep=%u:t%u/%u:t%u\n",
+              (unsigned)atom.atom_number, (unsigned long long)jc, core_req,
+              (unsigned)atom.pre_dep[0].atom_id,
+              (unsigned)atom.pre_dep[0].dependency_type,
+              (unsigned)atom.pre_dep[1].atom_id,
+              (unsigned)atom.pre_dep[1].dependency_type);
    if (ioctl(dev->fd, KBASE_IOCTL_JOB_SUBMIT, &sub) < 0) {
       mesa_loge("kbase: JOB_SUBMIT(dep) err=%d", errno);
       (void)0;

@@ -60,16 +60,17 @@ static inline int panvk_trace_on_(void) { static int v = -1; if (v < 0) { const 
  * so a future vk_sync_wait() on queue->sync (or a signal semaphore) does
  * the actual blocking, off the submission's critical path. */
 
-/* v67b: vertex/tiler work overlaps the previous pass (PANVK_OVERLAP=0: off) */
+/* v67b: vertex/tiler work overlaps the previous pass. PANVK_OVERLAP=1
+ * enables it; default OFF to prevent 0x58 back-to-back faults. v68a: this
+ * is now the single shared definition (declared in panvk_cmd_buffer.h);
+ * cmd_buffer.c's heap-half split calls it so both sides always agree. */
 #include <stdlib.h>
-static __attribute__((unused)) bool
+bool
 panvk_overlap_enabled(void)
 {
    static int on = -1;
    if (on < 0) {
       const char *e = getenv("PANVK_OVERLAP");
-      /* OFF by default to prevent 0x58 back-to-back faults;
-       * enable with PANVK_OVERLAP=1 */
       on = (e && e[0] != '0');
    }
    return on;
@@ -103,9 +104,11 @@ static unsigned g_fdiag_n;
       if (g_fdiag_n < 12 && (jc_)->first_job != 0) {                          \
          list_for_each_entry(struct panvk_priv_bo, bo,                        \
                              &(pool_).bos, node) {                            \
+            /* v68a: 512 B headroom so the v3 full 96-word JD dump and the    \
+             * tgt/xtra follow reads stay inside the block. */               \
             if ((jc_)->first_job >= bo->addr.dev &&                          \
-                (jc_)->first_job + 64 <=                                      \
-                bo->addr.dev + pan_kmod_bo_size(bo->bo)) {                    \
+                (jc_)->first_job + 512 <=                                    \
+                bo->addr.dev + pan_kmod_bo_size(bo->bo)) {                   \
                const uint32_t *w =                                            \
                   (const uint32_t *)((const uint8_t *)bo->addr.host +         \
                   (size_t)((jc_)->first_job - bo->addr.dev));                 \
@@ -117,6 +120,16 @@ static unsigned g_fdiag_n;
                   (fprintf)(stderr, "%08x%s", w[fd_i],                        \
                           (fd_i == 3 || fd_i == 7 || fd_i == 11) ? " " : "");\
                (fprintf)(stderr, "\n");                                       \
+               if ((xtra_) != 0) {                                            \
+                  /* v3: full 96-word (384 B) JD dump for the vtc chain;      \
+                   * words 16-95 carry the payload the 16-word snapshot      \
+                   * never showed (next-job chaining, remaining draws). */   \
+                  (fprintf)(stderr, "[FDIAG/%s] jd96= words=", tag_);         \
+                  for (unsigned fd_i = 16; fd_i < 96; fd_i++)                 \
+                     (fprintf)(stderr, "%08x%s", w[fd_i],                     \
+                             (fd_i % 8 == 7) ? " " : "");                     \
+                  (fprintf)(stderr, "\n");                                    \
+               }                                                              \
                if ((tgt_off_) != 0) {                                         \
                   uint64_t fd_t =                                             \
                      (uint64_t)w[(tgt_off_) >> 2] |                           \

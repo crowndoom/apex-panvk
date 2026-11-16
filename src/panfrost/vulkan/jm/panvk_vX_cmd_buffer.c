@@ -280,18 +280,9 @@ panvk_per_arch(cmd_alloc_tls_desc)(struct panvk_cmd_buffer *cmdbuf, bool gfx)
    return VK_SUCCESS;
 }
 
-/* v67b: vertex/tiler work overlaps the previous pass (PANVK_OVERLAP=0: off) */
-#include <stdlib.h>
-static __attribute__((unused)) bool
-panvk_overlap_enabled(void)
-{
-   static int on = -1;
-   if (on < 0) {
-      const char *e = getenv("PANVK_OVERLAP");
-      on = !(e && e[0] == '0');
-   }
-   return on;
-}
+/* v67b: panvk_overlap_enabled() moved to panvk_vX_gpu_queue.c (declared in
+ * panvk_cmd_buffer.h) so the heap-half split here and the dependency wiring
+ * in the submit path can never disagree about PANVK_OVERLAP again. */
 
 VkResult
 panvk_per_arch(cmd_prepare_tiler_context)(struct panvk_cmd_buffer *cmdbuf,

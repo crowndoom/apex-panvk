@@ -616,16 +616,24 @@ panvk_per_arch(create_device)(struct panvk_physical_device *physical_device,
                  PANVK_G57_BUILD_SHA, PAN_ARCH,
                  physical_device->kbase_node_path[0] ? "kbase" : "panthor",
                  banner_n);
-      uint64_t tiler_heap_mb = 512;
+      /* v68a: pre-commit the tiler heap and drop GROW_ON_GPF
+       * (PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT). The kernel's MMU-fault growth /
+       * GED-trim bookkeeping for a grow-on-GPF heap is the only GPU-heap
+       * state that persists across jobs and evolves with job count, and an
+       * MTK kbase that cannot grow/trim the heap in time kills the very
+       * next job with an instant JM fault (0x58 DATA_INVALID). With a fully
+       * committed heap there are no heap MMU faults at all. 128 MB covers
+       * the AIO cube (~14 MB/frame); PANVK_TILER_HEAP_MB (16..2048) still
+       * overrides. */
+      uint64_t tiler_heap_mb = 128;
       const char *e = getenv("PANVK_TILER_HEAP_MB");
       if (e && atoi(e) >= 16 && atoi(e) <= 2048)
          tiler_heap_mb = atoi(e);
-      static int logged;
-      if (!logged++)
-         (void)0;
+      fprintf(stderr, "[PANVK] tiler_heap=%lluMB committed=1 gpf=0\n",
+              (unsigned long long)tiler_heap_mb);
       result = panvk_priv_bo_create(
          device, tiler_heap_mb * 1024 * 1024,
-         PAN_KMOD_BO_FLAG_NO_MMAP | PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT,
+         PAN_KMOD_BO_FLAG_NO_MMAP,
          VK_SYSTEM_ALLOCATION_SCOPE_DEVICE, &device->tiler_heap);
    }
    if (result != VK_SUCCESS)
